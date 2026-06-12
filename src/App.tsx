@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
-type InventoryItem = { name: string; quantity: number; kind: string };
+type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
 type ChatEntry = { role: 'LLM' | 'PLAYER' | 'SYSTEM'; text: string };
 type ObjGeometry = {
   vertices: [number, number, number][];
@@ -52,9 +52,9 @@ const initialState: GameState = {
   },
   location: { x: 7, y: 2, label: 'Outpost Gate' },
   inventory: [
-    { name: '9mm Pistol', quantity: 1, kind: 'weapon' },
-    { name: 'Rusty Key', quantity: 1, kind: 'quest' },
-    { name: 'Medkit', quantity: 2, kind: 'consumable' },
+    { name: '9mm Pistol', quantity: 1, kind: 'weapon', desc: '> Arma estándar. Condición: Operativa.' },
+    { name: 'Rusty Key', quantity: 1, kind: 'quest', desc: '> Llave pesada de hierro con el número 4.' },
+    { name: 'Medkit', quantity: 2, kind: 'consumable', desc: '> Restaura 50 HP.' },
   ],
   activeNpc: null,
 };
@@ -118,12 +118,30 @@ function parseObjModel(text: string): ObjGeometry {
 
 function App() {
   const [game, setGame] = useState<GameState>(initialState);
+  // Recuerda el índice del ítem seleccionado en la grilla
+  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null);
+
+  // Función para tirar el ítem y limpiar la selección
+  const dropItem = (index: number) => {
+    setGame((prev) => {
+      const newInventory = [...prev.inventory];
+      const droppedItem = newInventory[index];
+      newInventory.splice(index, 1); // Lo elimina del array
+      
+      // Opcional: Mandar un aviso a la consola del Narrador
+      setChat((c) => [...c, { role: 'SYSTEM', text: `[SYSTEM] Dropped: ${droppedItem.name}` }]);
+      
+      return { ...prev, inventory: newInventory };
+    });
+    setSelectedItemIndex(null); // Oculta el menú inferior
+  };
+
   const [input, setInput] = useState('');
   const [chat, setChat] = useState<ChatEntry[]>([
     { role: 'SYSTEM', text: 'C:\\> SISTEMA INICIADO. IA ENLACE ESTABLECIDO.' },
     { role: 'LLM', text: 'Te despiertas en una habitación oscura. ¿Qué haces?' },
   ]);
-  const map = useMemo(() => makeMap(10, 5), []);
+  const map = useMemo(() => makeMap(10, 8), []);
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -251,37 +269,133 @@ function App() {
         </section>
 
         <section className="center-column">
-          <div className="panel inventory-panel">
+<div className="panel inventory-panel">
             <div className="panel-title">INVENTORY</div>
             <div className="inventory-grid">
               {Array.from({ length: 12 }).map((_, index) => {
                 const item = game.inventory[index];
-                return (
-                  <div key={index} className="inventory-slot">
+                const isSelected = selectedItemIndex === index;
+                
+return (
+                  <button 
+                    key={index} 
+                    type="button"
+                    className="inventory-slot"
+                    onClick={() => item ? setSelectedItemIndex(index) : setSelectedItemIndex(null)}
+                    style={{ 
+                      cursor: item ? 'pointer' : 'default',
+                      /* Si está seleccionado: Borde verde brillante
+                         Si tiene ítem: Borde verde oscuro semi-transparente
+                         Si está vacío: Borde punteado muy sutil */
+                      border: isSelected 
+                        ? '1px solid #33ff00' 
+                        : item 
+                          ? '1px solid rgba(51, 255, 0, 0.3)' 
+                          : '1px dashed rgba(51, 255, 0, 0.1)',
+                      /* El hueco vacío tendrá un fondo un pelín más negro para que resalte la caja */
+                      backgroundColor: isSelected 
+                        ? 'rgba(51, 255, 0, 0.1)' 
+                        : item 
+                          ? 'transparent' 
+                          : 'rgba(0, 0, 0, 0.3)',
+                      minHeight: '40px', /* Asegura que la caja mantenga su forma aunque no haya texto */
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      padding: '0.5rem'
+                    }}
+                  >
                     {item ? (
                       <>
-                        <span>{item.name}</span>
-                        <small>{item.quantity} · {item.kind}</small>
+                        <span style={{ display: 'block', color: isSelected ? '#fff' : '#33ff00' }}>{item.name}</span>
+                        <small style={{ opacity: 0.7, color: '#33ff00' }}>{item.quantity} · {item.kind}</small>
                       </>
-                    ) : null}
-                  </div>
+                    ) : (
+                      /* Relleno visual opcional para que el hueco no colapse */
+                      <span style={{ display: 'block', color: '#33ff00'}}>[ Empty ]</span>
+                      // <small style={{ opacity: 0.7, color: '#33ff00' }}>{item.quantity} · {item.kind}</small>
+                      // <span style={{opacity: 0.5, color: '#33ff00', fontSize: '0.8rem' }}>[ Empty ]</span>
+                    )}
+                  </button>
                 );
               })}
             </div>
-            <div className="inventory-summary">{inventorySummary || 'Empty'}</div>
+            
+            {/* Panel inferior de Inspección / Acción */}
+            <div className="inventory-details" style={{ marginTop: '1rem', borderTop: '1px dashed #33ff00', paddingTop: '0.8rem', minHeight: '60px' }}>
+              {selectedItemIndex !== null && game.inventory[selectedItemIndex] ? (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, paddingRight: '1rem' }}>
+                    <strong style={{ color: '#fff' }}>{game.inventory[selectedItemIndex].name}</strong>
+                    <p style={{ margin: '0.4rem 0 0 0', fontSize: '0.9rem', opacity: 0.8, whiteSpace: 'pre-wrap' }}>
+                      {game.inventory[selectedItemIndex].desc || `> Objeto genérico tipo: ${game.inventory[selectedItemIndex].kind}.`}
+                    </p>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => dropItem(selectedItemIndex)}
+                    style={{ 
+                      color: '#000', 
+                      backgroundColor: '#33ff00', 
+                      border: 'none', 
+                      padding: '0.4rem 0.8rem', 
+                      cursor: 'pointer', 
+                      fontWeight: 'bold',
+                      fontFamily: 'inherit'
+                    }}
+                  >
+                    &gt; DROP
+                  </button>
+                </div>
+              ) : (
+                <span style={{ opacity: 0.4 }}>Haz clic en un ítem para inspeccionarlo...</span>
+              )}
+            </div>
           </div>
 
           <div className="panel stats-panel">
             <div className="panel-title">STATS</div>
-            <div className="stats-grid">
-              {statNames.map((stat) => (
-                <button key={stat} type="button" className="stat-card" onClick={() => levelStat(stat)}>
-                  <span>{stat}</span>
-                  <strong>{game.stats[stat]}</strong>
-                </button>
-              ))}
+            {/* Usamos whiteSpace: 'pre' y una fuente monoespaciada para garantizar la cuadrícula ASCII */}
+            <div className="ascii-stats-container" style={{whiteSpace: 'pre', fontSize: '2rem', color: '#33ff00' }}>
+              {/* Filas de Atributos */}
+              {statNames.map((stat) => {
+                const namePadded = stat.padEnd(12, ' ');
+                const valPadded = game.stats[stat].toString().padStart(2, '0');
+                
+                return (
+                  <div key={stat} className="ascii-stat-row" style={{ display: 'block' }}>
+                    {` ${namePadded} : ${valPadded} `}
+                    {game.statPoints > 0 ? (
+                      <span 
+                        className="ascii-btn" 
+                        onClick={() => levelStat(stat)}
+                        style={{ 
+                          cursor: 'pointer', 
+                          color: '#ffff00', 
+                          fontWeight: 'bold',
+                          textShadow: '0 0 5px #ffff00'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = '#fff';
+                          e.currentTarget.style.backgroundColor = '#33ff00';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = '#ffff00';
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }}
+                      >
+                        [+]
+                      </span>
+                    ) : (
+                      '   '
+                    )}
+                    {``}
+                  </div>
+                );
+              })}
+              
+              {/* {`+-----------------------+\n`} */}
             </div>
-            <div className="stat-points">Points available: {game.statPoints} · Click a stat to level it up</div>
           </div>
         </section>
 

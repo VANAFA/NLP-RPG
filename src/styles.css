@@ -1,6 +1,20 @@
+
+@font-face {
+  /* font-family: 'VT323';
+  src: url('/VT323-Regular.ttf') format('truetype'); */
+  font-family: 'Sixtyfour';
+  src: url('/Sixtyfour-Regular-VariableFont_BLED,SCAN.ttf') format('truetype');
+  /* font-family: 'Workbench';
+  src: url('/Workbench-Regular-VariableFont_BLED,SCAN.ttf') format('truetype'); */
+  font-weight: normal;
+  font-style: normal;
+}
+
 :root {
   color-scheme: dark;
-  font-family: 'Courier New', monospace;
+  /* font-family: 'VT323', monospace; */
+  font-family: 'Sixtyfour', monospace;
+  /* font-family: 'Workbench', monospace; */
   background: #000;
   color: #33ff00;
 }
@@ -310,4 +324,83 @@ button:hover {
   #root {
     overflow: auto;
   }
+}
+
+/* 1. Contenedor principal: Aberración Cromática en los textos */
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #050505;
+  border-radius: 35px; /* <--- AQUÍ ESTÁ LA CURVATURA DEL MONITOR */
+  text-shadow: 1.5px 0px 1px rgba(255, 0, 0, 0.6), -1.5px 0px 1px rgba(0, 255, 255, 0.6);
+}
+
+/* 2. Capa Frontal: Scanlines finas y máscara RGB */
+.app-shell::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: 
+    /* Líneas negras horizontales */
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+    /* Píxeles RGB verticales (muy sutil) */
+    linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  background-size: 100% 4px, 3px 100%;
+  z-index: 999;
+  /* CRÍTICO: Permite que los clics traspasen este filtro hacia tus botones */
+  pointer-events: none; 
+}
+
+/* 3. Capa de Curvatura de Pantalla (Viñeta del Tubo) */
+.app-shell::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  /* Viñeta reducida casi al mínimo, solo oscurece el 15% de los bordes */
+  background: radial-gradient(circle, rgba(0,0,0,0) 80%, rgba(0,0,0,0.15) 100%);
+  /* Sombra interna cortada a la mitad para matar el efecto "sucio" */
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
+  border-radius: 35px; /* <--- Acompaña la curvatura del cristal */
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Opcional: Asegúrate de que el body tenga un fondo oscuro por si se ven las esquinas de fuera del tubo */
+body {
+  background-color: #000;
+}
+
+/* 4. Animación de la barra de refresco gruesa (Tu div actual) */
+@keyframes roll {
+  0% { transform: translateY(-100vh); }
+  100% { transform: translateY(100vh); }
+}
+
+.scanlines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 15vh;
+  /* Brillo blanco semitransparente */
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0),
+    rgba(255,255,255,0.05) 50%,
+    rgba(255,255,255,0)
+  );
+  z-index: 998;
+  opacity: 0.6;
+  animation: roll 8s linear infinite;
+  pointer-events: none;
 }
