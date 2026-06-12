@@ -55,6 +55,7 @@ button:hover {
   height: 100%;
   padding: 14px;
   background: radial-gradient(circle at top, rgba(51, 255, 0, 0.08), transparent 35%), #000;
+  perspective: 1000px; /* Para dar un ligero efecto 3D al contenido */
 }
 
 .scanlines {
@@ -122,6 +123,10 @@ button:hover {
   grid-template-columns: 1.1fr 1fr 0.95fr;
   gap: 12px;
   height: calc(100% - 46px);
+  /* Efecto de ligera inclinación para simular la curvatura del monitor */
+  /* transform: rotateX(2deg) rotateY(-1deg) scale(0.98); */
+  transform-style: preserve-3d;
+  transition: transform 0.1s;
 }
 
 .panel {
@@ -333,45 +338,61 @@ button:hover {
   height: 100vh;
   overflow: hidden;
   background-color: #050505;
-  border-radius: 35px; /* <--- AQUÍ ESTÁ LA CURVATURA DEL MONITOR */
+  
+  /* Curvatura elíptica: comprime las esquinas simulando la carcasa del tubo */
+  border-radius: 80px / 25px; 
+  
+  /* El sangrado de texto que ya tenías */
   text-shadow: 1.5px 0px 1px rgba(255, 0, 0, 0.6), -1.5px 0px 1px rgba(0, 255, 255, 0.6);
 }
 
 /* 2. Capa Frontal: Scanlines finas y máscara RGB */
+/* Scanlines estáticas más gruesas y oscuras */
 .app-shell::before {
   content: " ";
   display: block;
   position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  right: 0;
+  top: 0; left: 0; bottom: 0; right: 0;
   background: 
-    /* Líneas negras horizontales */
+    /* Cambiamos la opacidad del negro a 0.4 para más contraste */
     linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
-    /* Píxeles RGB verticales (muy sutil) */
     linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-  background-size: 100% 4px, 3px 100%;
+  /* Aumentamos de 4px a 7px de grosor */
+  background-size: 100% 6px, 3px 100%;
   z-index: 999;
-  /* CRÍTICO: Permite que los clics traspasen este filtro hacia tus botones */
   pointer-events: none; 
 }
 
-/* 3. Capa de Curvatura de Pantalla (Viñeta del Tubo) */
+/* Y asegúrate de que tu ::after siga teniendo una sombra interna FUERTE */
 .app-shell::after {
   content: " ";
   display: block;
   position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  right: 0;
-  /* Viñeta reducida casi al mínimo, solo oscurece el 15% de los bordes */
-  background: radial-gradient(circle, rgba(0,0,0,0) 80%, rgba(0,0,0,0.15) 100%);
-  /* Sombra interna cortada a la mitad para matar el efecto "sucio" */
-  box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
-  border-radius: 35px; /* <--- Acompaña la curvatura del cristal */
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: radial-gradient(circle, rgba(0,0,0,0) 70%, rgba(0,0,0,0.4) 100%);
+  
+  /* Esto es lo que le da "volumen" al tubo de cristal */
+  box-shadow: inset 0 0 50px rgba(0,0,0,0.8);
+  
+  border-radius: 80px / 25px; /* Debe coincidir con la carcasa */
   z-index: 1000;
+  pointer-events: none;
+}
+
+/* El haz de refresco del monitor (Fuerte y visible) */
+.scanlines {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100vw;
+  height: 12vh; /* Un haz un poco más grueso */
+  background: linear-gradient(
+    to bottom,
+    rgba(200, 255, 200, 0),
+    rgba(200, 255, 200, 0.25) 50%, /* Luz cruda y más opaca */
+    rgba(200, 255, 200, 0)
+  );
+  z-index: 9999; /* Asegura que pase por encima de absolutamente todo */
+  animation: roll 6s linear infinite;
   pointer-events: none;
 }
 

@@ -298,11 +298,17 @@ return (
                         : item 
                           ? 'transparent' 
                           : 'rgba(0, 0, 0, 0.3)',
-                      minHeight: '40px', /* Asegura que la caja mantenga su forma aunque no haya texto */
+                      // minHeight: '40px', /* Asegura que la caja mantenga su forma aunque no haya texto */
+                      minHeight: '70px',
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'center',
-                      padding: '0.5rem'
+                      padding: '0.5rem',
+                      /* ... tus otros estilos ... */
+                      height: '70px', /* <-- LA BALA DE PLATA: Altura estricta para llenos y vacíos */
+                      maxHeight: '70px',
+                      overflow: 'hidden', /* Evita que si un nombre es muy largo, deforme el botón */
+                      /* ... el resto ... */
                     }}
                   >
                     {item ? (
@@ -311,10 +317,12 @@ return (
                         <small style={{ opacity: 0.7, color: '#33ff00' }}>{item.quantity} · {item.kind}</small>
                       </>
                     ) : (
-                      /* Relleno visual opcional para que el hueco no colapse */
-                      <span style={{ display: 'block', color: '#33ff00'}}>[ Empty ]</span>
-                      // <small style={{ opacity: 0.7, color: '#33ff00' }}>{item.quantity} · {item.kind}</small>
-                      // <span style={{opacity: 0.5, color: '#33ff00', fontSize: '0.8rem' }}>[ Empty ]</span>
+                      /* Truco fantasma: Replicamos el DOM exacto para igualar la altura */
+                      <>
+                        <span style={{ display: 'block', color: '#33ff00', opacity: 0.3 }}>[ Empty ]</span>
+                        {/* Este small ocupa espacio físico pero no se ve */}
+                        <small style={{ opacity: 0 }}>-</small> 
+                      </>
                     )}
                   </button>
                 );
