@@ -123,7 +123,7 @@ function App() {
     { role: 'SYSTEM', text: 'C:\\> SISTEMA INICIADO. IA ENLACE ESTABLECIDO.' },
     { role: 'LLM', text: 'Te despiertas en una habitación oscura. ¿Qué haces?' },
   ]);
-  const map = useMemo(() => makeMap(10, 10), []);
+  const map = useMemo(() => makeMap(10, 5), []);
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -199,18 +199,18 @@ function App() {
       <div className="scanlines" />
       <header className="top-bar">
         <div className="top-meter top-meter-left">
-          <span className="top-meter-label">HP</span>
-          <div className="top-meter-track">
-            <div style={{ width: `${(game.hp / game.hpMax) * 100}%` }} />
-          </div>
-          <span className="top-meter-value">{game.hp}/{game.hpMax}</span>
-        </div>
-        <div className="top-meter top-meter-right">
           <span className="top-meter-label">XP</span>
           <div className="top-meter-track xp">
             <div style={{ width: `${(game.xp / game.xpMax) * 100}%` }} />
           </div>
           <span className="top-meter-value">Level {game.level}</span>
+        </div>
+        <div className="top-meter top-meter-right">
+          <span className="top-meter-label">HP</span>
+          <div className="top-meter-track">
+            <div style={{ width: `${(game.hp / game.hpMax) * 100}%` }} />
+          </div>
+          <span className="top-meter-value">{game.hp}/{game.hpMax}</span>
         </div>
       </header>
 
@@ -380,13 +380,13 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
 
     const project = (point: [number, number, number], time: number) => {
       // Rotate 180° around Y axis to face the viewer, plus a tiny wobble
-      const wobble = Math.sin(time * 0.001) * 0.06;
+      const wobble = Math.sin(time * 0.0015) * 0.03 + 0.05;
       const yaw = Math.PI + wobble;
       // Slight tilt for personality
       const pitch = -0.15;
       const roll = 0;
 
-      const [x, y, z] = point;
+      const [z, y, x] = point;
       const cy = Math.cos(yaw);
       const sy = Math.sin(yaw);
       const cx = Math.cos(pitch);
@@ -399,12 +399,12 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
       const pitchY = rollY * cx - z * sx;
       const pitchZ = rollY * sx + z * cx;
       const yawX = rollX * cy - pitchZ * sy;
-      const depth = pitchZ * cy + rollX * sy + 3.2;
+      const depth = -pitchZ * cy + rollX * sy + 20;
       // Float bob: slow sine wave on screen Y
       const bob = Math.sin(time * 0.0018 + seed * 100) * 5;
       return {
-        x: yawX * 110 / depth,
-        y: pitchY * 110 / depth + bob,
+        x: yawX * 1150 / depth - 50,
+        y: -(pitchY * 1150 / depth) + bob + 157,
         z: depth,
       };
     };
@@ -416,17 +416,56 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
       ctx.fillStyle = 'rgba(0,0,0,0.88)';
       ctx.fillRect(0, 0, width, height);
 
+    // 1. Proyectamos todos los vértices como antes
       const points = model.vertices.map((vertex) => project(vertex, time));
       const cx = width / 2;
       const cy = height / 2;
 
-      ctx.strokeStyle = '#33ff00';
-      ctx.fillStyle = 'rgba(51,255,0,0.07)';
-      ctx.lineWidth = 1;
+      // Sets para rastrear qué vértices y aristas son visibles
+      const visibleVertices = new Set<number>();
+      const visibleEdges = new Set<string>();
+      const visibleFaces: { indices: number[]; depth: number }[] = [];
 
-      model.faces.forEach((face) => {
+      // 2. Backface Culling y cálculo de profundidad
+      model.faces.forEach((faceIndices) => {
+        if (faceIndices.length < 3) return;
+
+        const p0 = points[faceIndices[0]];
+        const p1 = points[faceIndices[1]];
+        const p2 = points[faceIndices[2]];
+
+        // Producto cruzado 2D de los primeros tres vértices proyectados
+        const crossProduct = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+
+        // Si crossProduct es mayor a 0, la cara apunta hacia atrás.
+        // (Nota: Si el modelo se renderiza al revés -se ve la nuca y no la cara-, 
+        // cambiá este > 0 por un < 0. Depende de cómo exportaste el .obj)
+        if (crossProduct < 0) return;
+
+        // Si pasó el culling, calculamos su profundidad para el Painter's Algorithm
+        let avgZ = 0;
+        faceIndices.forEach((index, i) => {
+          avgZ += points[index].z;
+          visibleVertices.add(index); // Marcamos el vértice como visible
+          
+          // Registramos la arista como visible
+          const nextIndex = faceIndices[(i + 1) % faceIndices.length];
+          const edgeKey = index < nextIndex ? `${index}:${nextIndex}` : `${nextIndex}:${index}`;
+          visibleEdges.add(edgeKey);
+        });
+        avgZ /= faceIndices.length;
+
+        visibleFaces.push({ indices: faceIndices, depth: avgZ });
+      });
+
+      // 3. Z-Sorting de las caras que sobrevivieron
+      visibleFaces.sort((a, b) => b.depth - a.depth);
+
+// 4. Dibujamos caras, aristas y vértices TODO JUNTO en orden de profundidad
+      visibleFaces.forEach((face) => {
+        // A. Dibujar la cara sólida (Polígono)
         ctx.beginPath();
-        face.forEach((index, faceIndex) => {
+        face.indices.forEach((index, faceIndex) => {
           const point = points[index];
           const px = cx + point.x;
           const py = cy + point.y;
@@ -434,24 +473,25 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
           else ctx.lineTo(px, py);
         });
         ctx.closePath();
+        
+        ctx.fillStyle = '#114400'; // Color sólido de relleno
         ctx.fill();
-      });
-
-      model.edges.forEach(([from, to]) => {
-        const a = points[from];
-        const b = points[to];
-        ctx.beginPath();
-        ctx.moveTo(cx + a.x, cy + a.y);
-        ctx.lineTo(cx + b.x, cy + b.y);
+        
+        ctx.strokeStyle = '#33ff00'; // Color del wireframe
+        ctx.lineWidth = 1;
         ctx.stroke();
-      });
 
-      points.forEach((point) => {
-        ctx.beginPath();
-        ctx.arc(cx + point.x, cy + point.y, 1.5, 0, Math.PI * 2);
+        // B. Dibujar los vértices (puntitos) correspondientes SOLO a esta cara
         ctx.fillStyle = '#33ff00';
-        ctx.fill();
+        face.indices.forEach((index) => {
+          const point = points[index];
+          ctx.beginPath();
+          ctx.arc(cx + point.x, cy + point.y, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
       });
+      
+      // ELIMINAR EL PASO 5 ANTERIOR (ya no necesitamos iterar visibleVertices)
 
       raf = requestAnimationFrame(draw);
     };
