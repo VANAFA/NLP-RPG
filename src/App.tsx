@@ -32,7 +32,7 @@ const statNames: StatName[] = [
 ];
 
 const npcProfiles = ['OGRO', 'MERCADER', 'SOLDADO', 'CULTISTA'];
-const npcModelUrl = '/basic-head-mesh.obj';
+const npcModelUrl = './basic-head-mesh.obj';
 
 const initialState: GameState = {
   hp: 74,
