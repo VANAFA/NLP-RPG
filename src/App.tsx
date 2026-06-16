@@ -38,7 +38,7 @@ const statNames: StatName[] = [
 ];
 
 const npcProfiles = ['OGRO', 'MERCADER', 'SOLDADO', 'CULTISTA'];
-const npcModelUrl = '/basic-head-mesh.glb';
+const npcModelUrl = './basic-head-mesh.glb';
 
 const initialState: GameState = {
   hp: 74,
