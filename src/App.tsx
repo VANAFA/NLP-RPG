@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchLlmResponse } from './llmService';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
 type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
-type ChatEntry = { role: 'LLM' | 'PLAYER' | 'SYSTEM'; text: string };
+
+// Actualizado para separar pensamiento e historia
+type ChatEntry = 
+  | { role: 'SYSTEM' | 'PLAYER'; text: string }
+  | { role: 'Narrator'; story: string; thinking: string };
+
 type ObjGeometry = {
   vertices: [number, number, number][];
   faces: number[][];
@@ -116,10 +122,15 @@ function parseObjModel(text: string): ObjGeometry {
   return { vertices, faces, edges };
 }
 
-function App() {
+export default function App() {
   const [game, setGame] = useState<GameState>(initialState);
+  
   // Recuerda el índice del ítem seleccionado en la grilla
   const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null);
+
+  // Estados nuevos para el LLM y el modo Debug
+  const [isDebugMode, setIsDebugMode] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
 
   // Función para tirar el ítem y limpiar la selección
   const dropItem = (index: number) => {
@@ -139,14 +150,14 @@ function App() {
   const [input, setInput] = useState('');
   const [chat, setChat] = useState<ChatEntry[]>([
     { role: 'SYSTEM', text: 'C:\\> SISTEMA INICIADO. IA ENLACE ESTABLECIDO.' },
-    { role: 'LLM', text: 'Te despiertas en una habitación oscura. ¿Qué haces?' },
+    { role: 'Narrator', story: 'Te despiertas en una habitación oscura. ¿Qué haces?', thinking: '[SISTEMA INTERNO]\nIniciando secuencia de despertar.' },
   ]);
   const map = useMemo(() => makeMap(10, 8), []);
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
-  }, [chat]);
+  }, [chat, isThinking]);
 
   const inventorySummary = game.inventory.map((item) => `${item.name} x${item.quantity}`).join(', ');
 
@@ -161,18 +172,58 @@ function App() {
     activeNpc: game.activeNpc,
   });
 
-  const submitPrompt = (text: string) => {
-    const snapshot = contextSnapshot();
-    setChat((prev) => [
-      ...prev,
-      { role: 'PLAYER', text },
-      {
-        role: 'SYSTEM',
-        text: `CTX => loc:${snapshot.location.label} (${snapshot.location.x},${snapshot.location.y}) | hp:${snapshot.hp} | lvl:${snapshot.level} | xp:${snapshot.xp} | inv:${snapshot.inventory.length} items`,
-      },
-      { role: 'LLM', text: 'Narrador: respuesta simulada. Conecta aquí tu API LLM y las herramientas.' },
-    ]);
+  // LLM Submit Prompt integrado
+  const submitPrompt = async (text: string) => {
+    if (!text.trim() || isThinking) return;
+    
+    setChat((prev) => [...prev, { role: 'PLAYER', text }]);
     setInput('');
+    setIsThinking(true);
+
+    try {
+      // 1. Llamada al servicio LLM (mock)
+      const response = await fetchLlmResponse(text, game);
+
+      // 2. Procesamos las herramientas forzadas
+      response.toolCalls.forEach((call: any) => {
+        if (call.name === 'move') {
+           setGame(prev => ({
+             ...prev,
+             location: {
+               x: clamp(prev.location.x + call.args.dx, 0, 9),
+               y: clamp(prev.location.y + call.args.dy, 0, 9),
+               label: `Sector LLM-${Math.floor(Math.random()*100)}`
+             }
+           }));
+        }
+        if (call.name === 'addItem') {
+           setGame(prev => ({ ...prev, inventory: [...prev.inventory, call.args] }));
+        }
+        if (call.name === 'dropItem') {
+           setGame(prev => {
+             const newInv = [...prev.inventory];
+             if (newInv.length > 0 && call.args.index < newInv.length) {
+                newInv.splice(call.args.index, 1);
+             }
+             return { ...prev, inventory: newInv };
+           });
+           setSelectedItemIndex(null); 
+        }
+        if (call.name === 'spawnNpc') {
+           spawnNpc();
+        }
+      });
+
+      // 3. Añadimos el resultado narrativo y el pensamiento a la consola
+      setChat((prev) => [
+        ...prev,
+        { role: 'Narrator', story: response.story, thinking: response.thinking }
+      ]);
+    } catch (e) {
+      setChat((prev) => [...prev, { role: 'SYSTEM', text: 'ERR: Fallo de conexión con el LLM.' }]);
+    } finally {
+      setIsThinking(false);
+    }
   };
 
   const movePlayer = (dx: number, dy: number) =>
@@ -223,6 +274,23 @@ function App() {
           </div>
           <span className="top-meter-value">Level {game.level}</span>
         </div>
+        
+        {/* BOTÓN TOGGLE DEBUG AL CENTRO DE LA BARRA */}
+        <button 
+          onClick={() => setIsDebugMode(!isDebugMode)}
+          style={{ 
+            backgroundColor: isDebugMode ? '#ffff00' : 'transparent', 
+            color: isDebugMode ? '#000' : '#ffff00',
+            border: '1px solid #ffff00',
+            padding: '0.2rem 1rem',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontFamily: 'inherit'
+          }}
+        >
+          {isDebugMode ? 'DEBUG [ON]' : 'DEBUG [OFF]'}
+        </button>
+
         <div className="top-meter top-meter-right">
           <span className="top-meter-label">HP</span>
           <div className="top-meter-track">
@@ -236,11 +304,42 @@ function App() {
         <section className="left-rail panel">
           <div className="panel-title">NARRATOR LOG</div>
           <div className="chat-log" ref={logRef}>
-            {chat.map((entry, index) => (
-              <div key={index} className={`chat-line ${entry.role.toLowerCase()}`}>
-                <span className="chat-role">{entry.role}:</span> {entry.text}
-              </div>
-            ))}
+            {chat.map((entry, index) => {
+              // RENDERIZADO ESPECIAL PARA EL LLM
+              if (entry.role === 'Narrator') {
+                return (
+                  <div key={index} className="chat-line llm" style={{ marginBottom: '1rem', marginTop: '0.5rem' }}>
+                    {isDebugMode && (
+                      <div style={{ 
+                        color: '#ffff00', 
+                        whiteSpace: 'pre-wrap', 
+                        marginBottom: '0.5rem', 
+                        padding: '0.5rem', 
+                        borderLeft: '2px solid #ffff00',
+                        backgroundColor: 'rgba(255, 255, 0, 0.05)',
+                        fontSize: '0.9rem'
+                      }}>
+                        {entry.thinking}
+                      </div>
+                    )}
+                    <div>
+                      <span className="chat-role">Narrator:</span> {entry.story}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={index} className={`chat-line ${entry.role.toLowerCase()}`}>
+                  <span className="chat-role">{entry.role}:</span> {entry.text}
+                </div>
+              );
+            })}
+            
+            {/* TEXTO DE PROCESAMIENTO VISUAL */}
+            {isThinking && (
+               <div style={{ opacity: 0.5, fontStyle: 'italic', marginTop: '0.5rem' }}>[ Narrator is thinking... ]</div>
+            )}
           </div>
           <form
             className="input-row"
@@ -254,29 +353,21 @@ function App() {
               autoFocus
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Type your command for the narrator LLM..."
+              disabled={isThinking}
+              placeholder="What do you do?"
             />
           </form>
-          <div className="tool-row">
-            <button type="button" onClick={() => submitPrompt(input || 'look around')}>Send</button>
-            <button type="button" onClick={() => toolAction('inventory.add( item )')}>Add Item Tool</button>
-            <button type="button" onClick={() => toolAction('inventory.drop( item )')}>Drop Item Tool</button>
-            <button type="button" onClick={() => toolAction('npc.spawn()')}>Spawn NPC</button>
-          </div>
-          <div className="help-text">
-            LLM payload: instruction, location, stats, inventory, hp/xp/level, and active NPC state.
-          </div>
         </section>
 
         <section className="center-column">
-<div className="panel inventory-panel">
+          <div className="panel inventory-panel">
             <div className="panel-title">INVENTORY</div>
             <div className="inventory-grid">
               {Array.from({ length: 12 }).map((_, index) => {
                 const item = game.inventory[index];
                 const isSelected = selectedItemIndex === index;
                 
-return (
+                return (
                   <button 
                     key={index} 
                     type="button"
@@ -356,7 +447,7 @@ return (
                   </button>
                 </div>
               ) : (
-                <span style={{ opacity: 0.4 }}>Haz clic en un ítem para inspeccionarlo...</span>
+                <span style={{ opacity: 0.4 }}>Click an item to inspect it...</span>
               )}
             </div>
           </div>
@@ -419,19 +510,22 @@ return (
                 )),
               )}
             </div>
-            <div className="map-footer">Location: {game.location.label}</div>
-            <div className="map-controls">
-              <button type="button" onClick={() => movePlayer(0, -1)}>↑</button>
-              <div>
-                <button type="button" onClick={() => movePlayer(-1, 0)}>←</button>
-                <button type="button" onClick={() => movePlayer(1, 0)}>→</button>
+            {/* if debug then show buttons */}
+              {isDebugMode && (
+              <div className="map-controls" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <button type="button" onClick={() => movePlayer(0, -1)} style={{ marginBottom: '0.5rem' }}>↑</button>
+                <div>
+                  <button type="button" onClick={() => movePlayer(-1, 0)} style={{ marginRight: '0.5rem' }}>←</button>
+                  <button type="button" onClick={() => movePlayer(1, 0)}>→</button>
+                </div>
+                <button type="button" onClick={() => movePlayer(0, 1)} style={{ marginTop: '0.5rem' }}>↓</button>
               </div>
-              <button type="button" onClick={() => movePlayer(0, 1)}>↓</button>
-            </div>
+              )
+            }
           </div>
 
           <div className="panel npc-panel">
-            <div className="panel-title">NPC WINDOW</div>
+            <div className="panel-title">NPC</div>
             <div className="npc-frame">
               {game.activeNpc ? (
                 <WireframeModel src={npcModelUrl} seed={game.activeNpc.seed} />
@@ -442,12 +536,13 @@ return (
                 </div>
               )}
             </div>
-            <div className="npc-footer">
-              {game.activeNpc ? `${game.activeNpc.name} · ${game.activeNpc.title}` : 'Spawn an NPC to show the 3D wireframe.'}
-            </div>
             <div className="npc-controls">
-              <button type="button" onClick={spawnNpc}>Spawn NPC</button>
-              <button type="button" onClick={releaseNpc}>Return Control</button>
+              {isDebugMode && (
+                <>
+                  <button type="button" onClick={spawnNpc} style={{ backgroundColor: '#33ff00', color: '#000', border: 'none', padding: '0.4rem 0.8rem', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'inherit' }}>Spawn NPC</button>
+                  <button type="button" onClick={releaseNpc} style={{ backgroundColor: '#ff3333', color: '#fff', border: 'none', padding: '0.4rem 0.8rem', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'inherit' }}>Return Control</button>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -538,17 +633,14 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
       ctx.fillStyle = 'rgba(0,0,0,0.88)';
       ctx.fillRect(0, 0, width, height);
 
-    // 1. Proyectamos todos los vértices como antes
       const points = model.vertices.map((vertex) => project(vertex, time));
       const cx = width / 2;
       const cy = height / 2;
 
-      // Sets para rastrear qué vértices y aristas son visibles
       const visibleVertices = new Set<number>();
       const visibleEdges = new Set<string>();
       const visibleFaces: { indices: number[]; depth: number }[] = [];
 
-      // 2. Backface Culling y cálculo de profundidad
       model.faces.forEach((faceIndices) => {
         if (faceIndices.length < 3) return;
 
@@ -556,21 +648,15 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
         const p1 = points[faceIndices[1]];
         const p2 = points[faceIndices[2]];
 
-        // Producto cruzado 2D de los primeros tres vértices proyectados
         const crossProduct = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
 
-        // Si crossProduct es mayor a 0, la cara apunta hacia atrás.
-        // (Nota: Si el modelo se renderiza al revés -se ve la nuca y no la cara-, 
-        // cambiá este > 0 por un < 0. Depende de cómo exportaste el .obj)
         if (crossProduct < 0) return;
 
-        // Si pasó el culling, calculamos su profundidad para el Painter's Algorithm
         let avgZ = 0;
-        faceIndices.forEach((index, i) => {
+        faceIndices.forEach((index: number, i: number) => {
           avgZ += points[index].z;
-          visibleVertices.add(index); // Marcamos el vértice como visible
+          visibleVertices.add(index); 
           
-          // Registramos la arista como visible
           const nextIndex = faceIndices[(i + 1) % faceIndices.length];
           const edgeKey = index < nextIndex ? `${index}:${nextIndex}` : `${nextIndex}:${index}`;
           visibleEdges.add(edgeKey);
@@ -580,14 +666,11 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
         visibleFaces.push({ indices: faceIndices, depth: avgZ });
       });
 
-      // 3. Z-Sorting de las caras que sobrevivieron
       visibleFaces.sort((a, b) => b.depth - a.depth);
 
-// 4. Dibujamos caras, aristas y vértices TODO JUNTO en orden de profundidad
       visibleFaces.forEach((face) => {
-        // A. Dibujar la cara sólida (Polígono)
         ctx.beginPath();
-        face.indices.forEach((index, faceIndex) => {
+        face.indices.forEach((index: number, faceIndex: number) => {
           const point = points[index];
           const px = cx + point.x;
           const py = cy + point.y;
@@ -596,16 +679,15 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
         });
         ctx.closePath();
         
-        ctx.fillStyle = '#114400'; // Color sólido de relleno
+        ctx.fillStyle = '#114400'; 
         ctx.fill();
         
-        ctx.strokeStyle = '#33ff00'; // Color del wireframe
+        ctx.strokeStyle = '#33ff00'; 
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // B. Dibujar los vértices (puntitos) correspondientes SOLO a esta cara
         ctx.fillStyle = '#33ff00';
-        face.indices.forEach((index) => {
+        face.indices.forEach((index: number) => {
           const point = points[index];
           ctx.beginPath();
           ctx.arc(cx + point.x, cy + point.y, 1.5, 0, Math.PI * 2);
@@ -613,8 +695,6 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
         });
       });
       
-      // ELIMINAR EL PASO 5 ANTERIOR (ya no necesitamos iterar visibleVertices)
-
       raf = requestAnimationFrame(draw);
     };
 
@@ -627,5 +707,3 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
 
   return <canvas ref={canvasRef} className="wireframe-canvas" />;
 }
-
-export default App;
