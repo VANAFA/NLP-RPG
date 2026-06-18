@@ -3,6 +3,14 @@ import { fetchLlmResponse } from './llmService';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
 type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
+type TerrainType = 'plain' | 'mountain' | 'forest' | 'village' | 'castle';
+
+type MapCell = { 
+  x: number; 
+  y: number; 
+  terrain: TerrainType; 
+  blocked: boolean;
+};
 
 // Actualizado para separar pensamiento e historia
 type ChatEntry = 
@@ -25,6 +33,17 @@ type GameState = {
   location: { x: number; y: number; label: string };
   inventory: InventoryItem[];
   activeNpc: null | { name: string; title: string; seed: number };
+};
+
+const getTerrainVisual = (terrain: TerrainType) => {
+  switch (terrain) {
+    case 'mountain': return { char: '▲', opacity: 0.8, weight: 'normal', size: '2.8rem' };
+    case 'forest':   return { char: '♣', opacity: 0.5, weight: 'normal', size: '1.2rem' };
+    case 'village':  return { char: '⌂', opacity: 1,   weight: 'bold',   size: '2.8rem' };
+    case 'castle':   return { char: '♜', opacity: 1,   weight: 'bold',   size: '2.8rem' };
+    case 'plain': 
+    default:         return { char: '·', opacity: 0.2, weight: 'normal', size: '1.2rem' };
+  }
 };
 
 const statNames: StatName[] = [
@@ -69,10 +88,37 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function makeMap(width: number, height: number) {
-  return Array.from({ length: height }, (_, y) =>
-    Array.from({ length: width }, (_, x) => ({ x, y, blocked: (x + y) % 7 === 0 })),
+function makeMap(width: number, height: number): MapCell[][] {
+  // 1. Crear matriz vacía
+  let map: MapCell[][] = Array.from({ length: height }, (_, y) =>
+    Array.from({ length: width }, (_, x) => ({ x, y, terrain: 'plain' as TerrainType, blocked: false }))
   );
+
+  // 2. Sembrar cúmulos (puntos de inicio de biomas)
+  const seeds = [
+    { type: 'mountain', x: 2, y: 2 },
+    { type: 'forest', x: 10, y: 5 },
+    { type: 'swamp', x: 12, y: 1 }
+  ];
+
+  seeds.forEach(seed => {
+    // Generar radio de cúmulo
+    for (let i = -2; i <= 2; i++) {
+      for (let j = -2; j <= 2; j++) {
+        const nx = seed.x + i, ny = seed.y + j;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height && Math.random() > 0.3) {
+          map[ny][nx].terrain = seed.type as TerrainType;
+          if (seed.type === 'mountain') map[ny][nx].blocked = true;
+        }
+      }
+    }
+  });
+
+  // 3. Añadir puntos de interés individuales (Castillos/Villas)
+  map[5][7].terrain = 'castle';
+  map[1][1].terrain = 'village';
+  
+  return map;
 }
 
 function parseObjModel(text: string): ObjGeometry {
@@ -501,13 +547,47 @@ export default function App() {
         <section className="right-column">
           <div className="panel map-panel">
             <div className="panel-title">WORLD MAP</div>
-            <div className="map-grid">
+<div className="map-grid">
               {map.map((row) =>
-                row.map((cell) => (
-                  <div key={`${cell.x}-${cell.y}`} className={`map-cell ${cell.blocked ? 'blocked' : ''}`}>
-                    {game.location.x === cell.x && game.location.y === cell.y ? '◉' : ''}
-                  </div>
-                )),
+                row.map((cell) => {
+                  const isPlayerHere = game.location.x === cell.x && game.location.y === cell.y;
+                  const visual = getTerrainVisual(cell.terrain);
+
+                  return (
+                    <div 
+                      key={`${cell.x}-${cell.y}`} 
+                      className="map-cell"
+                      style={{ 
+                        position: 'relative',
+                        // Optional: subtle background for mountains to make them look dense
+                        backgroundColor: cell.terrain === 'mountain' ? 'rgba(51, 255, 0, 0.05)' : 'transparent'
+                      }}
+                    >
+                      {/* Terrain Graphic */}
+                      <span style={{ 
+                        opacity: visual.opacity, 
+                        fontWeight: visual.weight as any, // "as any" evita quejas tontas de TypeScript aquí
+                        fontSize: visual.size,            // <-- Toma el tamaño de tu diccionario
+                        lineHeight: 1                     // <-- Evita que el ícono grande empuje la grilla hacia abajo
+                      }}>
+                        {visual.char}
+                      </span>
+
+                      {/* Player Overlay */}
+                      {isPlayerHere && (
+                        <span style={{ 
+                          position: 'absolute', 
+                          color: '#fff', // White core for the player
+                          textShadow: '0 0 8px #33ff00', // Heavy green glow
+                          fontWeight: 'bold',
+                          zIndex: 10
+                        }}>
+                          ◉
+                        </span>
+                      )}
+                    </div>
+                  );
+                }),
               )}
             </div>
             {/* if debug then show buttons */}

@@ -6,59 +6,82 @@ export interface LLMContext {
   inventory: any[];
 }
 
+// 1. Envolvemos la URL de Hugging Face dentro del proxy público para engañar al CORS
+const HF_API_URL = '[https://corsproxy.io/?https://api-inference.huggingface.co/models/Qwen/Qwen2.5-1.5B-Instruct/v1/chat/completions](https://corsproxy.io/?https://api-inference.huggingface.co/models/Qwen/Qwen2.5-1.5B-Instruct/v1/chat/completions)';
+
+// 2. IMPORTANTE: Borra este token y genera uno nuevo cuando termines el proyecto, 
+// ya que al pegarlo en el chat de IA acaba de quedar expuesto.
+const HF_TOKEN = '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'; 
+
 export async function fetchLlmResponse(userText: string, context: LLMContext) {
-  // Simulamos el delay del modelo
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  const systemPrompt = `You are the Game Master of a dark, retro-terminal RPG. 
+You must respond ONLY with a valid JSON object matching the following TypeScript interface:
+{
+  "thinking": "string",
+  "story": "string",
+  "toolCalls": Array<{ name: 'move' | 'addItem' | 'dropItem' | 'spawnNpc', args: any }>
+}
 
-  const thinking = `[EVALUANDO INPUT DEL OPERADOR]
-Mensaje recibido: "${userText}"
--- Analizando Estado Actual --
-Vitalidad: ${context.hp}/${context.hpMax}
-Coordenadas: ${context.location.label} [${context.location.x}, ${context.location.y}]
-Objetos en inventario: ${context.inventory.length}
-Stats detectados: STR(${context.stats.Strength}) PER(${context.stats.Perception})
-[DECISIÓN DEL MODELO]
-Ejecutando protocolo de estrés: Forzando llamadas aleatorias a todas las herramientas disponibles.`;
+-- Current Game Context --
+- Player HP: ${context.hp}/${context.hpMax}
+- Location: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
+- Stats: ${JSON.stringify(context.stats)}
+- Inventory: ${JSON.stringify(context.inventory.map(i => i.name))}
 
-  const story = "There will be consecuences to your actions... When the LLM is actually implemented. Allan please add details";
+Available Tools:
+1. {"name": "move", "args": {"dx": number, "dy": number}}
+2. {"name": "addItem", "args": {"name": "string", "quantity": number, "kind": "string", "desc": "string"}}
+3. {"name": "dropItem", "args": {"index": number}}
+4. {"name": "spawnNpc", "args": {}}
 
-  const toolCalls: { name: string; args: any }[] = [];
+CRITICAL: Return ONLY raw JSON.`;
 
-  // 1. Mover al jugador
-  toolCalls.push({ 
-    name: 'move', 
-    args: { dx: Math.random() > 0.5 ? 1 : -1, dy: Math.random() > 0.5 ? 1 : -1 } 
-  });
-
-  // 2. Spawn NPC
-  toolCalls.push({ name: 'spawnNpc', args: {} });
-
-  // 3. Añadir ítem
-  const junkNames = ['Cable Pelado', 'Batería de Litio', 'Engranaje Roto', 'Chip Quemado'];
-  toolCalls.push({
-    name: 'addItem',
-    args: {
-      name: junkNames[Math.floor(Math.random() * junkNames.length)],
-      quantity: 1,
-      kind: 'junk',
-      desc: '> Objeto de prueba inyectado directamente por el LLM simulado.'
+try {
+    const response = await fetch(HF_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${HF_TOKEN}` 
+      },
+      body: JSON.stringify({
+        // Aseguramos de enviar también el modelo en el body
+        model: "Qwen/Qwen2.5-1.5B-Instruct", 
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userText }
+        ],
+        temperature: 0.2, 
+        max_tokens: 1024
+      }),
+    });
+  
+    if (!response.ok) {
+      const errorText = await response.text(); 
+      // Si recibes un error 503, significa que el modelo está cargando. Solo espera 20 segs y reintenta.
+      throw new Error(`Error HTTP ${response.status}: ${errorText}`);
     }
-  });
 
-  // 4. Tirar ítem
-  if (context.inventory.length > 0) {
-    const randomInvIndex = Math.floor(Math.random() * context.inventory.length);
-    toolCalls.push({ name: 'dropItem', args: { index: randomInvIndex } });
+    const data = await response.json();
+    let rawContent = data.choices[0].message.content.trim();
+
+    if (rawContent.startsWith("```")) {
+      rawContent = rawContent.replace(/^```json/, "").replace(/^```/, "").replace(/```$/, "").trim();
+    }
+
+    const parsedResponse = JSON.parse(rawContent);
+
+    return {
+      thinking: parsedResponse.thinking || '[No thinking provided]',
+      story: parsedResponse.story || '[No story narrative provided]',
+      toolCalls: parsedResponse.toolCalls || []
+    };
+
+  } catch (error) {
+    console.error("LLM Connection Error:", error);
+    return {
+      thinking: `[CRITICAL ERROR]\nDetails: ${error}`,
+      story: "La conexión con el servidor remoto se ha perdido.",
+      toolCalls: []
+    };
   }
-
-  // 5. Modificar HP
-  const hpChange = Math.random() > 0.5 ? -10 : +10;
-  toolCalls.push({ name: 'modifyHp', args: { amount: hpChange } });
-
-  // 6. Incrementar xp random
-  const xpGain = Math.floor(Math.random() * 20) + 5;
-  toolCalls.push({ name: 'gainXp', args: { amount: xpGain } });
-
-  // Devolvemos exactamente lo que tu App.tsx está esperando
-  return { thinking, story, toolCalls };
 }

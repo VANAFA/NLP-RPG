@@ -224,14 +224,21 @@ button:hover {
   padding: 10px;
 }
 
-.map-cell {
-  aspect-ratio: 1;
-  border: 1px solid rgba(51, 255, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  background: rgba(0, 0, 0, 0.6);
+.map-grid { 
+  display: grid; 
+  /* Mantenemos las 15 columnas fijas */
+  grid-template-columns: repeat(15, 1fr); 
+  gap: 0; 
+  flex: 1; 
+  /* Aseguramos que cada celda sea un cuadrado perfecto */
+  grid-auto-rows: 1fr; 
+}
+.map-cell { 
+  aspect-ratio: 1; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  /* Sin bordes, pero con tamaño fijo forzado por la grilla */
 }
 
 .map-cell.blocked {
