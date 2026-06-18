@@ -44,8 +44,8 @@ try {
         'Authorization': `Bearer ${HF_TOKEN}` 
       },
       body: JSON.stringify({
-        // Aseguramos de enviar también el modelo en el body
-        model: "Qwen/Qwen2.5-1.5B-Instruct", 
+        // Vuelve a poner tu modelo aquí
+        model: "pengu1n7/fireball-qwen3-4b-lora-10k", 
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userText }
