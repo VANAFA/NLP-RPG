@@ -8,7 +8,7 @@ export interface LLMContext {
 
 // 1. Envolvemos la URL de Hugging Face dentro del proxy público para engañar al CORS
 // const HF_API_URL = '[https://corsproxy.io/?https://api-inference.huggingface.co/models/Qwen/Qwen2.5-1.5B-Instruct/v1/chat/completions](https://corsproxy.io/?https://api-inference.huggingface.co/models/Qwen/Qwen2.5-1.5B-Instruct/v1/chat/completions)';
-const HF_API_URL = 'https://corsproxy.io/?https://api-inference.huggingface.co/models/Qwen/Qwen2.5-1.5B-Instruct/v1/chat/completions';
+const HF_API_URL = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://api-inference.huggingface.co/models/Qwen/Qwen2.5-1.5B-Instruct/v1/chat/completions');
 
 // 2. IMPORTANTE: Borra este token y genera uno nuevo cuando termines el proyecto, 
 // ya que al pegarlo en el chat de IA acaba de quedar expuesto.
