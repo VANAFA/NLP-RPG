@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchLlmResponse } from './llmService';
+import { fetchLlmResponse, LS_BASE_URL_KEY, LS_API_KEY_KEY } from './llmService';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
 type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
@@ -178,6 +178,11 @@ export default function App() {
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
 
+  // Ajustes de conexión al servidor de Kaggle (URL + API key, persistidos en localStorage)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [baseUrlInput, setBaseUrlInput] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState('');
+
   // Función para tirar el ítem y limpiar la selección
   const dropItem = (index: number) => {
     setGame((prev) => {
@@ -204,6 +209,19 @@ export default function App() {
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
   }, [chat, isThinking]);
+
+  // Hidrata los campos de ajustes desde localStorage una sola vez al montar
+  useEffect(() => {
+    setBaseUrlInput(localStorage.getItem(LS_BASE_URL_KEY) ?? '');
+    setApiKeyInput(localStorage.getItem(LS_API_KEY_KEY) ?? '');
+  }, []);
+
+  const saveSettings = () => {
+    localStorage.setItem(LS_BASE_URL_KEY, baseUrlInput.trim());
+    localStorage.setItem(LS_API_KEY_KEY, apiKeyInput.trim());
+    setIsSettingsOpen(false);
+    setChat((prev) => [...prev, { role: 'SYSTEM', text: '[SYSTEM] Configuración de conexión guardada.' }]);
+  };
 
   const inventorySummary = game.inventory.map((item) => `${item.name} x${item.quantity}`).join(', ');
 
@@ -337,6 +355,22 @@ export default function App() {
           {isDebugMode ? 'DEBUG [ON]' : 'DEBUG [OFF]'}
         </button>
 
+        {/* BOTÓN DE AJUSTES DE CONEXIÓN AL SERVIDOR DE KAGGLE */}
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          style={{
+            backgroundColor: 'transparent',
+            color: '#33ff00',
+            border: '1px solid #33ff00',
+            padding: '0.2rem 1rem',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontFamily: 'inherit'
+          }}
+        >
+          ⚙ LINK
+        </button>
+
         <div className="top-meter top-meter-right">
           <span className="top-meter-label">HP</span>
           <div className="top-meter-track">
@@ -345,6 +379,35 @@ export default function App() {
           <span className="top-meter-value">{game.hp}/{game.hpMax}</span>
         </div>
       </header>
+
+      {isSettingsOpen && (
+        <div className="settings-overlay" onClick={() => setIsSettingsOpen(false)}>
+          <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="panel-title">KAGGLE LINK SETTINGS</div>
+            <label>
+              Base URL
+              <input
+                value={baseUrlInput}
+                onChange={(e) => setBaseUrlInput(e.target.value)}
+                placeholder="https://xxxx.ngrok-free.app"
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="(opcional)"
+              />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button type="button" onClick={() => setIsSettingsOpen(false)}>Cancel</button>
+              <button type="button" onClick={saveSettings}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="layout">
         <section className="left-rail panel">
