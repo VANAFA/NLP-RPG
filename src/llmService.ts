@@ -75,11 +75,27 @@ const TOOL_ARGS_SCHEMAS = {
 // Schema-constrained decoding on this model/vocab is slow per token (see
 // backend/server.py), so string lengths are capped here to bound worst-case
 // latency deterministically instead of gambling on max_tokens alone.
+//
+// `npc` is a required sub-object rather than an optional tool call: the
+// narrator must always state whether an NPC is speaking this turn, and if
+// so, write their dialogue into `npc.dialogue` — never into `story`. That
+// keeps NPC speech reliably separated into its own UI channel (below the
+// NPC's head) instead of relying on parsing it back out of prose.
 const TURN_RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    thinking: { type: 'string', maxLength: 120 },
-    story: { type: 'string', minLength: 10, maxLength: 320 },
+    thinking: { type: 'string', maxLength: 100 },
+    story: { type: 'string', minLength: 5, maxLength: 260 },
+    npc: {
+      type: 'object',
+      properties: {
+        present: { type: 'boolean' },
+        name: { type: 'string', maxLength: 30 },
+        description: { type: 'string', maxLength: 120 },
+        dialogue: { type: 'string', maxLength: 220 },
+      },
+      required: ['present', 'name', 'description', 'dialogue'],
+    },
     toolCalls: {
       type: 'array',
       maxItems: 3,
@@ -93,7 +109,7 @@ const TURN_RESPONSE_SCHEMA = {
       },
     },
   },
-  required: ['thinking', 'story', 'toolCalls'],
+  required: ['thinking', 'story', 'npc', 'toolCalls'],
 };
 
 async function callLlmOnce(systemPrompt: string, userText: string, schema: object, temperature: number, maxTokens: number) {
@@ -164,6 +180,8 @@ IMPORTANT: This game's world is STRICTLY FANTASY — swords, magic, castles, for
 You are the Game Master of a dark fantasy RPG, presented through a retro-terminal display. You narrate the world, react to the player's actions, and use tools (toolCalls) to modify the game state when appropriate.
 Respond ONLY with a JSON object matching the requested schema, written entirely in English.
 
+IMPORTANT — NPC dialogue goes in a separate field, never in "story": "story" is ONLY for scene, environment, and action narration. If an NPC is present and speaking this turn (including if the player is directly addressing one), set npc.present to true, give them a name and a short profile description (appearance/role/personality — invent one the first time they appear, then stay consistent with it), and write what they say aloud in npc.dialogue. NEVER put an NPC's spoken words inside "story". If no NPC is present or speaking, set npc.present to false and leave name/description/dialogue as empty strings.
+
 -- Current Game State --
 - HP: ${context.hp}/${context.hpMax} | Level: ${context.level} | XP: ${context.xp}/${context.xpMax}
 - Location: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
@@ -182,21 +200,46 @@ Available tools:
 CRITICAL: Return ONLY the JSON.`;
 }
 
+export interface NpcTurnState {
+  present: boolean;
+  name: string;
+  description: string;
+  dialogue: string;
+}
+
+// Worst case (npc profile + 3 maxed-out tool calls all present at once) adds
+// up to roughly 500-600 tokens of schema-constrained content; 900 leaves
+// enough headroom that the model finishes its closing brace before hitting
+// the cap instead of getting cut off mid-string (the "text cutting off"
+// bug — max_tokens ending the response before valid JSON is complete).
+const TURN_MAX_TOKENS = 900;
+
 export async function fetchLlmResponse(userText: string, context: LLMContext) {
   try {
-    const parsed = await callLlm(buildTurnSystemPrompt(context), userText, TURN_RESPONSE_SCHEMA, 0.7, 350);
+    const parsed = await callLlm(buildTurnSystemPrompt(context), userText, TURN_RESPONSE_SCHEMA, 0.7, TURN_MAX_TOKENS);
+
+    const npc: NpcTurnState = {
+      present: Boolean(parsed.npc?.present),
+      name: typeof parsed.npc?.name === 'string' ? parsed.npc.name : '',
+      description: typeof parsed.npc?.description === 'string' ? parsed.npc.description : '',
+      dialogue: typeof parsed.npc?.dialogue === 'string' ? parsed.npc.dialogue : '',
+    };
 
     return {
       thinking: parsed.thinking || '[No thinking provided]',
       story: parsed.story || '[No story narrative provided]',
       toolCalls: parsed.toolCalls || [],
+      npc,
     };
   } catch (error) {
+    const noNpc: NpcTurnState = { present: false, name: '', description: '', dialogue: '' };
+
     if (error instanceof Error && error.message === 'LLM_NOT_CONFIGURED') {
       return {
         thinking: '[CONFIG] The server URL has not been configured.',
         story: 'The link to the Game Master is not configured. Open settings (⚙ LINK) and enter your server URL.',
         toolCalls: [],
+        npc: noNpc,
       };
     }
 
@@ -205,6 +248,7 @@ export async function fetchLlmResponse(userText: string, context: LLMContext) {
       thinking: `[CRITICAL ERROR]\nDetails: ${error}`,
       story: 'The connection to the Game Master has been lost. Check that the server is running and that the URL in ⚙ LINK is correct.',
       toolCalls: [],
+      npc: noNpc,
     };
   }
 }
@@ -212,14 +256,15 @@ export async function fetchLlmResponse(userText: string, context: LLMContext) {
 // --- Post-narration analyzer agents ---------------------------------------
 //
 // The narrator is asked to narrate AND remember to call the right tool when
-// its own narration implies a state change (movement, an NPC appearing).
-// That's unreliable — it can narrate "you arrive at the village" without
-// ever calling `move`. These analyzers read the narrator's own story text
-// after the fact and decide state changes independently; because each field
-// is required by its schema, the decision can't be silently skipped the way
-// an optional tool call can be.
-
-const NPC_TYPES = ['OGRE', 'MERCHANT', 'SOLDIER', 'CULTIST', 'NONE'];
+// its own narration implies a state change (movement). That's unreliable —
+// it can narrate "you arrive at the village" without ever calling `move`.
+// These analyzers read the narrator's own story text after the fact and
+// decide state changes independently; because each field is required by its
+// schema, the decision can't be silently skipped the way an optional tool
+// call can be. (NPC presence/dialogue is no longer analyzed after the fact —
+// it's part of the main narrator response itself, see `npc` in
+// TURN_RESPONSE_SCHEMA — since that's more reliable than inferring it back
+// out of already-written prose.)
 
 const XP_SCHEMA = {
   type: 'object',
@@ -237,24 +282,20 @@ const HP_SCHEMA = {
   required: ['hpDelta'],
 };
 
+// The map is always generated as 10 wide x 8 tall (see makeMap(10, 8) in
+// App.tsx) — x/y bounds below must match. Leaving them unbounded let the
+// model return coordinates far outside the real map, which then got clamped
+// to a map edge/corner regardless of what actually happened in the story —
+// that's the "map updates weirdly" bug.
 const MAP_SCHEMA = {
   type: 'object',
   properties: {
     locationChanged: { type: 'boolean' },
-    x: { type: 'integer', minimum: 0 },
-    y: { type: 'integer', minimum: 0 },
+    x: { type: 'integer', minimum: 0, maximum: 9 },
+    y: { type: 'integer', minimum: 0, maximum: 7 },
     label: { type: 'string', minLength: 1, maxLength: 50 },
   },
   required: ['locationChanged', 'x', 'y', 'label'],
-};
-
-const NPC_SCHEMA = {
-  type: 'object',
-  properties: {
-    npcPresent: { type: 'boolean' },
-    npcType: { type: 'string', enum: NPC_TYPES },
-  },
-  required: ['npcPresent', 'npcType'],
 };
 
 export interface TurnAnalysis {
@@ -262,17 +303,7 @@ export interface TurnAnalysis {
   hpDelta: number;
   locationChanged: boolean;
   location: { x: number; y: number; label: string };
-  npcPresent: boolean;
-  npcType: string;
 }
-
-const NO_OP_ANALYSIS: Omit<TurnAnalysis, 'location'> = {
-  xpAwarded: 0,
-  hpDelta: 0,
-  locationChanged: false,
-  npcPresent: false,
-  npcType: 'NONE',
-};
 
 async function getXpAwarded(playerInstruction: string, narratorStory: string): Promise<number> {
   const systemPrompt = `You are the XP referee for a fantasy RPG. Always respond in English.
@@ -296,7 +327,7 @@ async function getLocationChange(
   context: LLMContext,
 ): Promise<{ locationChanged: boolean; location: { x: number; y: number; label: string } }> {
   const systemPrompt = `You are the map tracker for a fantasy RPG. Always respond in English.
-Read the narrator's response, the player's current location, and the world map. Decide if the player's location changed during this turn (including arriving at a notable place mentioned in the map). If it changed, return the new coordinates and a short label for the place. If it did not change, return locationChanged: false and repeat the current coordinates/label.
+Read the narrator's response, the player's current location, and the world map. Be CONSERVATIVE: only set locationChanged to true if the narrator's response clearly states the player arrived somewhere new. Movement that is only described as heading toward / walking in the direction of a place, without confirming arrival, does NOT count as a change — keep locationChanged false and repeat the current coordinates in that case. When arrival at a notable place from the map is confirmed, use that place's exact coordinates rather than inventing new ones. Coordinates must stay within the map's bounds (X: 0-9, Y: 0-7).
 
 Current location: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
 Map: ${context.worldMapSummary}
@@ -314,33 +345,17 @@ Respond ONLY with the JSON object matching the requested schema.`;
   };
 }
 
-async function getNpcState(narratorStory: string): Promise<{ npcPresent: boolean; npcType: string }> {
-  const systemPrompt = `You are the NPC tracker for a fantasy RPG. Always respond in English.
-Read the narrator's response and decide if an NPC is now present and interacting with the player. If so, pick whichever npcType best fits: OGRE, MERCHANT, SOLDIER, or CULTIST. If no NPC is present or speaking, set npcPresent to false and npcType to NONE.
-Respond ONLY with the JSON object matching the requested schema.`;
-  const parsed = await callLlm(systemPrompt, `Narrator response: ${narratorStory}`, NPC_SCHEMA, 0.3, 100);
-
-  return {
-    npcPresent: Boolean(parsed.npcPresent),
-    npcType: typeof parsed.npcType === 'string' ? parsed.npcType : 'NONE',
-  };
-}
-
 export async function analyzeNarratorTurn(
   playerInstruction: string,
   narratorStory: string,
   context: LLMContext,
 ): Promise<TurnAnalysis> {
-  const [xpAwarded, hpDelta, locationResult, npcResult] = await Promise.all([
-    getXpAwarded(playerInstruction, narratorStory).catch(() => NO_OP_ANALYSIS.xpAwarded),
-    getHpDelta(narratorStory).catch(() => NO_OP_ANALYSIS.hpDelta),
+  const [xpAwarded, hpDelta, locationResult] = await Promise.all([
+    getXpAwarded(playerInstruction, narratorStory).catch(() => 0),
+    getHpDelta(narratorStory).catch(() => 0),
     getLocationChange(narratorStory, context).catch(() => ({
-      locationChanged: NO_OP_ANALYSIS.locationChanged,
+      locationChanged: false,
       location: context.location,
-    })),
-    getNpcState(narratorStory).catch(() => ({
-      npcPresent: NO_OP_ANALYSIS.npcPresent,
-      npcType: NO_OP_ANALYSIS.npcType,
     })),
   ]);
 
@@ -349,7 +364,5 @@ export async function analyzeNarratorTurn(
     hpDelta,
     locationChanged: locationResult.locationChanged,
     location: locationResult.location,
-    npcPresent: npcResult.npcPresent,
-    npcType: npcResult.npcType,
   };
 }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchLlmResponse, analyzeNarratorTurn, LS_BASE_URL_KEY, LS_API_KEY_KEY, type LLMContext, type TurnAnalysis } from './llmService';
+import { fetchLlmResponse, analyzeNarratorTurn, LS_BASE_URL_KEY, LS_API_KEY_KEY, type LLMContext, type TurnAnalysis, type NpcTurnState } from './llmService';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
 type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
-type TerrainType = 'plain' | 'mountain' | 'forest' | 'village' | 'castle';
+type TerrainType = 'plain' | 'mountain' | 'forest' | 'village' | 'castle' | 'swamp';
 
 type MapCell = { 
   x: number; 
@@ -22,6 +22,17 @@ type ObjGeometry = {
   faces: number[][];
   edges: [number, number][];
 };
+
+// Everything the NPC "is" and "says" lives here — rendered below its head in
+// the NPC panel, never in the narrator log. `dialogue` accumulates each line
+// the NPC speaks while it stays the same NPC (reset when a different NPC
+// takes over, see submitPrompt).
+type ActiveNpc = {
+  name: string;
+  description: string;
+  seed: number;
+  dialogue: string[];
+};
 type GameState = {
   hp: number;
   hpMax: number;
@@ -32,7 +43,7 @@ type GameState = {
   stats: Record<StatName, number>;
   location: { x: number; y: number; label: string };
   inventory: InventoryItem[];
-  activeNpc: null | { name: string; title: string; seed: number };
+  activeNpc: null | ActiveNpc;
   objective: string;
   worldNotes: string[];
 };
@@ -45,7 +56,8 @@ const getTerrainVisual = (terrain: TerrainType) => {
     case 'forest':   return { char: '♣', opacity: 0.5, weight: 'normal', size: '1.2rem' };
     case 'village':  return { char: '⌂', opacity: 1,   weight: 'bold',   size: '2.8rem' };
     case 'castle':   return { char: '♜', opacity: 1,   weight: 'bold',   size: '2.8rem' };
-    case 'plain': 
+    case 'swamp':    return { char: '≈', opacity: 0.7, weight: 'normal', size: '2rem' };
+    case 'plain':
     default:         return { char: '·', opacity: 0.2, weight: 'normal', size: '1.2rem' };
   }
 };
@@ -305,9 +317,12 @@ export default function App() {
     setChat((prev) => [...prev, { role: 'SYSTEM', text: '[SYSTEM] Connection settings saved.' }]);
   };
 
-  // Applies the background analyzer agents' decisions (XP, HP, location,
-  // NPC presence) once they resolve — runs a moment after the narrator's
-  // story is already on screen, per the chosen "don't block on this" UX.
+  // Applies the background analyzer agents' decisions (XP, HP, location)
+  // once they resolve — runs a moment after the narrator's story is already
+  // on screen, per the chosen "don't block on this" UX. NPC state is NOT
+  // handled here — it comes straight from the narrator's own response (see
+  // submitPrompt), which is more reliable than inferring it back out of
+  // already-written prose.
   const applyTurnAnalysis = (analysis: TurnAnalysis, width: number, height: number) => {
     setGame((prev) => {
       let xp = prev.xp;
@@ -335,12 +350,32 @@ export default function App() {
           }
         : prev.location;
 
-      const activeNpc =
-        analysis.npcPresent && analysis.npcType !== 'NONE'
-          ? { name: analysis.npcType, title: 'Speaking', seed: Math.random() }
-          : null;
+      return { ...prev, xp, level, xpMax, statPoints, hp, location };
+    });
+  };
 
-      return { ...prev, xp, level, xpMax, statPoints, hp, location, activeNpc };
+  // Merges the narrator's per-turn `npc` field into game state. Runs every
+  // turn: when npc.present is true we either start a fresh profile+dialogue
+  // (new NPC) or append to the current one (same NPC continuing to talk);
+  // when false, the NPC panel goes back to empty.
+  const applyNpcUpdate = (npc: NpcTurnState) => {
+    setGame((prev) => {
+      if (!npc.present) {
+        return prev.activeNpc ? { ...prev, activeNpc: null } : prev;
+      }
+
+      const isSameNpc = prev.activeNpc && prev.activeNpc.name === npc.name;
+      const priorDialogue = isSameNpc ? prev.activeNpc!.dialogue : [];
+      const dialogue = npc.dialogue ? [...priorDialogue, npc.dialogue].slice(-20) : priorDialogue;
+
+      const activeNpc: ActiveNpc = {
+        name: npc.name || prev.activeNpc?.name || 'Stranger',
+        description: npc.description || (isSameNpc ? prev.activeNpc!.description : ''),
+        seed: isSameNpc ? prev.activeNpc!.seed : Math.random(),
+        dialogue,
+      };
+
+      return { ...prev, activeNpc };
     });
   };
 
@@ -397,6 +432,11 @@ export default function App() {
         }
       });
 
+      // NPC profile/dialogue is a first-class part of the narrator's response
+      // (not narration text) — route it straight to the NPC panel, whether
+      // the player is addressing the NPC directly or just witnessing it talk.
+      applyNpcUpdate(response.npc);
+
       // Show the story right away — don't make the player wait through the
       // analyzer calls below just to read the response they're waiting on.
       setChat((prev) => [
@@ -444,7 +484,10 @@ export default function App() {
   const spawnNpc = () => {
     const seed = Math.random();
     const npcName = npcProfiles[Math.floor(seed * npcProfiles.length)] ?? 'DESCONOCIDO';
-    setGame((prev) => ({ ...prev, activeNpc: { name: npcName, title: 'Sub-LLM activo', seed } }));
+    setGame((prev) => ({
+      ...prev,
+      activeNpc: { name: npcName, description: '(Debug) Manually spawned test NPC.', seed, dialogue: ['...'] },
+    }));
     setChat((prev) => [...prev, { role: 'SYSTEM', text: `[TOOL] NPC spawn -> ${npcName}` }]);
   };
 
@@ -838,6 +881,30 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* NPC profile + everything it says lives here, below its head —
+                never in the narrator log, whether the narrator is describing
+                the NPC or the player is talking to it directly. */}
+            {game.activeNpc && (
+              <div className="npc-dialogue-panel">
+                <div className="npc-profile">
+                  <strong className="npc-name">{game.activeNpc.name}</strong>
+                  {game.activeNpc.description && (
+                    <p className="npc-description">{game.activeNpc.description}</p>
+                  )}
+                </div>
+                <div className="npc-dialogue-log">
+                  {game.activeNpc.dialogue.length > 0 ? (
+                    game.activeNpc.dialogue.map((line, index) => (
+                      <p key={index} className="npc-dialogue-line">&ldquo;{line}&rdquo;</p>
+                    ))
+                  ) : (
+                    <p className="npc-dialogue-line npc-dialogue-empty">...</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="npc-controls">
               {isDebugMode && (
                 <>
