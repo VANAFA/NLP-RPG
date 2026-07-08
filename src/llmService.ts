@@ -19,14 +19,6 @@ export interface LLMContext {
   worldMapSummary: string;
 }
 
-export interface NewCharacter {
-  stats: Record<string, number>;
-  inventory: InventoryItemInput[];
-  location: { x: number; y: number; label: string };
-  objective: string;
-  story: string;
-}
-
 // Claves de localStorage donde la app guarda la URL/API key del servidor LLM.
 // Exportadas para que App.tsx las reuse al leer/escribir el panel de ajustes.
 export const LS_BASE_URL_KEY = 'nlprpg.llm.baseUrl';
@@ -59,52 +51,6 @@ const TURN_RESPONSE_SCHEMA = {
     },
   },
   required: ['thinking', 'story', 'toolCalls'],
-};
-
-const CHARACTER_CREATION_SCHEMA = {
-  type: 'object',
-  properties: {
-    stats: {
-      type: 'object',
-      properties: {
-        Strength: { type: 'integer', minimum: 1, maximum: 8 },
-        Perception: { type: 'integer', minimum: 1, maximum: 8 },
-        Endurance: { type: 'integer', minimum: 1, maximum: 8 },
-        Charisma: { type: 'integer', minimum: 1, maximum: 8 },
-        Intelligence: { type: 'integer', minimum: 1, maximum: 8 },
-        Agility: { type: 'integer', minimum: 1, maximum: 8 },
-        Luck: { type: 'integer', minimum: 1, maximum: 8 },
-      },
-      required: ['Strength', 'Perception', 'Endurance', 'Charisma', 'Intelligence', 'Agility', 'Luck'],
-    },
-    inventory: {
-      type: 'array',
-      minItems: 2,
-      maxItems: 4,
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', minLength: 2, maxLength: 40 },
-          quantity: { type: 'integer', minimum: 1 },
-          kind: { type: 'string', minLength: 2, maxLength: 20 },
-          desc: { type: 'string', minLength: 5, maxLength: 90 },
-        },
-        required: ['name', 'quantity', 'kind', 'desc'],
-      },
-    },
-    location: {
-      type: 'object',
-      properties: {
-        x: { type: 'integer', minimum: 0 },
-        y: { type: 'integer', minimum: 0 },
-        label: { type: 'string', minLength: 3, maxLength: 50 },
-      },
-      required: ['x', 'y', 'label'],
-    },
-    objective: { type: 'string', minLength: 10, maxLength: 150 },
-    story: { type: 'string', minLength: 40, maxLength: 350 },
-  },
-  required: ['stats', 'inventory', 'location', 'objective', 'story'],
 };
 
 async function callLlmOnce(systemPrompt: string, userText: string, schema: object, temperature: number, maxTokens: number) {
@@ -218,38 +164,4 @@ export async function fetchLlmResponse(userText: string, context: LLMContext) {
       toolCalls: [],
     };
   }
-}
-
-export async function generateNewCharacter(worldMapSummary: string): Promise<NewCharacter> {
-  const systemPrompt = `IMPORTANT: You must write ONLY in English. Never use Spanish or any other language. All text you generate (item names, descriptions, objective, story) must be in English, no exceptions.
-
-You are the Game Master creating a new character to start a dark, retro-terminal RPG session.
-Invent a coherent character: who they are, their current situation, and their first objective.
-
-Rules:
-- Stats (Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck): a NOVICE character, each stat between 1 and 6, totaling roughly 22-26 points across all 7. Not a powerful hero — an ordinary person starting their story.
-- Inventory: 2 to 4 logical items for that character and their situation (with name, quantity, kind, and a brief one-sentence description) — all in English.
-- Location: pick a map cell (coordinates within the available range) consistent with the terrain type, with a descriptive label for the place, in English.
-- Objective: a clear, concrete sentence describing the character's initial mission or goal, in English.
-- Story: 2 to 4 narrative sentences in English introducing the player to who their character is, where they are, and what their objective is. This is the first message the player will read, so it needs to hook them.
-
-Available map: ${worldMapSummary}
-
-Respond ONLY with the JSON object matching the requested schema, written entirely in English.`;
-
-  const parsed = await callLlm(
-    systemPrompt,
-    'Generate a new character to start the game.',
-    CHARACTER_CREATION_SCHEMA,
-    0.9,
-    800,
-  );
-
-  return {
-    stats: parsed.stats,
-    inventory: parsed.inventory,
-    location: parsed.location,
-    objective: parsed.objective,
-    story: parsed.story,
-  };
 }

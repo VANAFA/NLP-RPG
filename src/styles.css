@@ -219,22 +219,19 @@ button:hover {
 
 .map-grid {
   display: grid;
+  /* Must match the actual map width (makeMap(10, 8) in App.tsx) — a mismatch
+     here makes the grid wrap rows at the wrong cell count, mixing rows together. */
   grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 2px;
-  padding: 10px;
+  grid-auto-rows: 1fr;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
-
-.map-grid { 
-  display: grid; 
-  /* Mantenemos las 15 columnas fijas */
-  grid-template-columns: repeat(15, 1fr); 
-  gap: 0; 
-  flex: 1; 
-  /* Aseguramos que cada celda sea un cuadrado perfecto */
-  grid-auto-rows: 1fr; 
-}
-.map-cell { 
-  aspect-ratio: 1; 
+.map-cell {
+  aspect-ratio: 1;
+  min-width: 0;
+  overflow: hidden;
   display: flex; 
   align-items: center; 
   justify-content: center; 
