@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchLlmResponse, LS_BASE_URL_KEY, LS_API_KEY_KEY, type LLMContext } from './llmService';
+import { fetchLlmResponse, analyzeNarratorTurn, LS_BASE_URL_KEY, LS_API_KEY_KEY, type LLMContext, type TurnAnalysis } from './llmService';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
 type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
@@ -65,9 +65,10 @@ const npcModelUrl = './basic-head-mesh.obj';
 
 // Fixed for every game: character/room intro, starting items, and starting
 // position. Only stats are randomized fresh each time (see randomizeLowStats).
+// Strictly fantasy setting — no sci-fi/tech elements.
 const OPENING_STORY =
-  "You don't remember your name — only the cold, and the taste of ash in your mouth. You're a survivor, nothing more: no rank, no allegiance, just the will to keep breathing.\n\n" +
-  'You come to at the foot of a rusted outpost gate, half-swallowed by drifting sand. A cracked terminal screen flickers nearby, looping a warning in a language you don\'t recognize. Whatever happened here, it happened fast — and you\'re the only one left standing.';
+  "You don't remember your name — only the cold, and the taste of ash on your tongue. You're a survivor, nothing more: no title, no banner, just the will to keep breathing.\n\n" +
+  "You come to at the foot of a crumbling stone gate, half-swallowed by creeping moss and drifting fog. Torches gutter in rusted iron sconces nearby, and a faded inscription is carved into the archway above you, worn smooth by centuries. Whatever happened here, it happened long ago — and you're the only living soul in sight.";
 
 const initialState: GameState = {
   hp: 100,
@@ -85,14 +86,14 @@ const initialState: GameState = {
     Agility: 3,
     Luck: 3,
   },
-  location: { x: 7, y: 2, label: 'Outpost Gate' },
+  location: { x: 7, y: 2, label: 'The Broken Gate' },
   inventory: [
-    { name: '9mm Pistol', quantity: 1, kind: 'weapon', desc: '> Standard sidearm. Condition: Operational.' },
-    { name: 'Rusty Key', quantity: 1, kind: 'quest', desc: '> Heavy iron key stamped with the number 4.' },
-    { name: 'Medkit', quantity: 2, kind: 'consumable', desc: '> Restores 50 HP.' },
+    { name: 'Rusty Shortsword', quantity: 1, kind: 'weapon', desc: '> A worn blade, notched but still sharp enough to bite.' },
+    { name: 'Rusty Key', quantity: 1, kind: 'quest', desc: '> Heavy iron key stamped with the numeral IV.' },
+    { name: 'Healing Poultice', quantity: 2, kind: 'consumable', desc: '> A bundle of herbs and bandages. Restores 50 HP.' },
   ],
   activeNpc: null,
-  objective: 'Find out what happened to this place, and find a way out alive.',
+  objective: 'Uncover what happened to this place, and find a way out alive.',
   worldNotes: [],
 };
 
@@ -136,8 +137,8 @@ function makeMap(width: number, height: number): MapCell[][] {
   });
 
   // 3. Añadir puntos de interés individuales (Castillos/Villas)
-  map[5][7].terrain = 'castle';
-  map[1][1].terrain = 'village';
+  map[5][7].terrain = 'village';
+  map[1][1].terrain = 'castle';
   
   return map;
 }
@@ -151,7 +152,7 @@ function summarizeMap(map: MapCell[][], location: { x: number; y: number }): str
     if (cell.terrain !== 'plain') notable.push(`(${cell.x},${cell.y}):${cell.terrain}`);
   }));
 
-  return `Grilla ${width}x${height}. Jugador en (${location.x},${location.y}). Puntos notables: ${notable.join(', ') || 'ninguno'}.`;
+  return `Grid ${width}x${height}. Player at (${location.x},${location.y}). Notable locations: ${notable.join(', ') || 'none'}.`;
 }
 
 function parseObjModel(text: string): ObjGeometry {
@@ -304,44 +305,74 @@ export default function App() {
     setChat((prev) => [...prev, { role: 'SYSTEM', text: '[SYSTEM] Connection settings saved.' }]);
   };
 
+  // Applies the background analyzer agents' decisions (XP, HP, location,
+  // NPC presence) once they resolve — runs a moment after the narrator's
+  // story is already on screen, per the chosen "don't block on this" UX.
+  const applyTurnAnalysis = (analysis: TurnAnalysis, width: number, height: number) => {
+    setGame((prev) => {
+      let xp = prev.xp;
+      let level = prev.level;
+      let xpMax = prev.xpMax;
+      let statPoints = prev.statPoints;
+
+      if (analysis.xpAwarded > 0) {
+        xp += analysis.xpAwarded;
+        while (xp >= xpMax) {
+          xp -= xpMax;
+          level += 1;
+          statPoints += 1;
+          xpMax = Math.round(xpMax * 1.2);
+        }
+      }
+
+      const hp = analysis.hpDelta !== 0 ? clamp(prev.hp + analysis.hpDelta, 0, prev.hpMax) : prev.hp;
+
+      const location = analysis.locationChanged
+        ? {
+            x: clamp(analysis.location.x, 0, width - 1),
+            y: clamp(analysis.location.y, 0, height - 1),
+            label: analysis.location.label,
+          }
+        : prev.location;
+
+      const activeNpc =
+        analysis.npcPresent && analysis.npcType !== 'NONE'
+          ? { name: analysis.npcType, title: 'Speaking', seed: Math.random() }
+          : null;
+
+      return { ...prev, xp, level, xpMax, statPoints, hp, location, activeNpc };
+    });
+  };
+
   // LLM Submit Prompt integrado
   const submitPrompt = async (text: string) => {
     if (!text.trim() || isThinking) return;
-    
+
     setChat((prev) => [...prev, { role: 'PLAYER', text }]);
     setInput('');
     setIsThinking(true);
 
-    try {
-      const context: LLMContext = {
-        hp: game.hp,
-        hpMax: game.hpMax,
-        xp: game.xp,
-        xpMax: game.xpMax,
-        level: game.level,
-        stats: game.stats,
-        location: game.location,
-        inventory: game.inventory,
-        objective: game.objective,
-        worldNotes: game.worldNotes,
-        worldMapSummary: summarizeMap(map, game.location),
-      };
-      const response = await fetchLlmResponse(text, context);
-      const width = map[0]?.length ?? 10;
-      const height = map.length;
+    const context: LLMContext = {
+      hp: game.hp,
+      hpMax: game.hpMax,
+      xp: game.xp,
+      xpMax: game.xpMax,
+      level: game.level,
+      stats: game.stats,
+      location: game.location,
+      inventory: game.inventory,
+      objective: game.objective,
+      worldNotes: game.worldNotes,
+      worldMapSummary: summarizeMap(map, game.location),
+    };
+    const width = map[0]?.length ?? 10;
+    const height = map.length;
 
-      // Procesamos las herramientas pedidas por el LLM
+    try {
+      const response = await fetchLlmResponse(text, context);
+
+      // Narrator-driven tools: discrete, explicit actions the model states directly.
       response.toolCalls.forEach((call: any) => {
-        if (call.name === 'move') {
-           setGame(prev => ({
-             ...prev,
-             location: {
-               x: clamp(prev.location.x + call.args.dx, 0, width - 1),
-               y: clamp(prev.location.y + call.args.dy, 0, height - 1),
-               label: `Sector LLM-${Math.floor(Math.random()*100)}`
-             }
-           }));
-        }
         if (call.name === 'addItem') {
            setGame(prev => ({ ...prev, inventory: [...prev.inventory, call.args] }));
         }
@@ -355,9 +386,6 @@ export default function App() {
            });
            setSelectedItemIndex(null);
         }
-        if (call.name === 'spawnNpc') {
-           spawnNpc();
-        }
         if (call.name === 'setObjective') {
            setGame(prev => ({ ...prev, objective: call.args.objective ?? prev.objective }));
         }
@@ -369,14 +397,21 @@ export default function App() {
         }
       });
 
-      // 3. Añadimos el resultado narrativo y el pensamiento a la consola
+      // Show the story right away — don't make the player wait through the
+      // analyzer calls below just to read the response they're waiting on.
       setChat((prev) => [
         ...prev,
         { role: 'Narrator', story: response.story, thinking: response.thinking }
       ]);
+      setIsThinking(false);
+
+      // XP/HP/location/NPC-presence are decided by dedicated analyzer calls
+      // reading the narrator's own story text, in the background.
+      analyzeNarratorTurn(text, response.story, context)
+        .then((analysis) => applyTurnAnalysis(analysis, width, height))
+        .catch((error) => console.error('Turn analysis failed:', error));
     } catch (e) {
       setChat((prev) => [...prev, { role: 'SYSTEM', text: 'ERR: LLM connection failed.' }]);
-    } finally {
       setIsThinking(false);
     }
   };

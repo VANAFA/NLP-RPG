@@ -16,7 +16,7 @@ schema (or a sane default), guaranteeing well-formed output every time.
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
 from fastapi import FastAPI
@@ -77,10 +77,40 @@ generate_lock = threading.Lock()
 
 
 # --- Default (turn) response schema -----------------------------------
+#
+# 'move' and 'spawnNpc' are intentionally absent — the narrator often narrates
+# movement/NPCs without remembering to call the matching tool, so those are
+# decided by dedicated analyzer calls from the frontend instead (see
+# src/llmService.ts's analyzeNarratorTurn).
+#
+# args is a Union of concrete per-tool models rather than a bare Dict[str,
+# Any]: an untyped object schema makes lm-format-enforcer crash as soon as
+# the model writes a real key into it (AttributeError: 'bool' object has no
+# attribute 'anyOf' — its parser falls back to `additionalProperties`, which
+# Pydantic emits as a bare boolean rather than a schema it knows how to walk).
+
+class AddItemArgs(BaseModel):
+    name: str
+    quantity: int
+    kind: str
+    desc: str
+
+
+class DropItemArgs(BaseModel):
+    index: int
+
+
+class SetObjectiveArgs(BaseModel):
+    objective: str
+
+
+class RememberArgs(BaseModel):
+    note: str
+
 
 class ToolCall(BaseModel):
-    name: Literal["move", "addItem", "dropItem", "spawnNpc", "setObjective", "remember"]
-    args: Dict[str, Any] = {}
+    name: Literal["addItem", "dropItem", "setObjective", "remember"]
+    args: Union[AddItemArgs, DropItemArgs, SetObjectiveArgs, RememberArgs]
 
 
 class NarratorResponse(BaseModel):
