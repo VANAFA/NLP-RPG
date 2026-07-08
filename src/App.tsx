@@ -25,13 +25,14 @@ type ObjGeometry = {
 
 // Everything the NPC "is" and "says" lives here — rendered below its head in
 // the NPC panel, never in the narrator log. `dialogue` accumulates each line
-// the NPC speaks while it stays the same NPC (reset when a different NPC
-// takes over, see submitPrompt).
+// of the exchange (player and NPC alike) while it stays the same NPC (reset
+// when a different NPC takes over, see applyNpcUpdate).
+type NpcDialogueEntry = { speaker: 'npc' | 'player'; text: string };
 type ActiveNpc = {
   name: string;
   description: string;
   seed: number;
-  dialogue: string[];
+  dialogue: NpcDialogueEntry[];
 };
 type GameState = {
   hp: number;
@@ -121,14 +122,31 @@ function clamp(value: number, min: number, max: number) {
 // Normalizing legacy saves on load keeps old saves usable instead of bricking them.
 function normalizeActiveNpc(raw: unknown): ActiveNpc | null {
   if (!raw || typeof raw !== 'object') return null;
-  const candidate = raw as Partial<ActiveNpc> & { name?: unknown };
+  const candidate = raw as { name?: unknown; description?: unknown; seed?: unknown; dialogue?: unknown };
   if (typeof candidate.name !== 'string' || !candidate.name) return null;
+
+  // `dialogue` has been through two shapes: pre-rework saves don't have it at
+  // all, and a brief in-between shape stored it as plain NPC-only strings —
+  // both need to be lifted into the current { speaker, text } entry shape.
+  let dialogue: NpcDialogueEntry[] = [];
+  if (Array.isArray(candidate.dialogue)) {
+    dialogue = candidate.dialogue
+      .map((entry): NpcDialogueEntry | null => {
+        if (typeof entry === 'string') return { speaker: 'npc', text: entry };
+        if (entry && typeof entry === 'object' && typeof (entry as any).text === 'string') {
+          const speaker = (entry as any).speaker === 'player' ? 'player' : 'npc';
+          return { speaker, text: (entry as any).text };
+        }
+        return null;
+      })
+      .filter((entry): entry is NpcDialogueEntry => entry !== null);
+  }
 
   return {
     name: candidate.name,
     description: typeof candidate.description === 'string' ? candidate.description : '',
     seed: typeof candidate.seed === 'number' ? candidate.seed : Math.random(),
-    dialogue: Array.isArray(candidate.dialogue) ? candidate.dialogue.filter((line) => typeof line === 'string') : [],
+    dialogue,
   };
 }
 
@@ -264,10 +282,12 @@ export default function App() {
   };
 
   const [input, setInput] = useState('');
+  const [npcInput, setNpcInput] = useState('');
   const [chat, setChat] = useState<ChatEntry[]>([]);
   const [map, setMap] = useState<MapCell[][]>(() => makeMap(10, 8));
   const [isInitializing, setIsInitializing] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
+  const npcLogRef = useRef<HTMLDivElement>(null);
   // React 18 StrictMode double-invokes mount effects in dev; without this
   // guard that would fire two concurrent character-generation requests.
   const hasInitializedRef = useRef(false);
@@ -275,6 +295,10 @@ export default function App() {
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
   }, [chat, isThinking]);
+
+  useEffect(() => {
+    npcLogRef.current?.scrollTo({ top: npcLogRef.current.scrollHeight, behavior: 'smooth' });
+  }, [game.activeNpc?.dialogue, isThinking]);
 
   // Hidrata los campos de ajustes desde localStorage una sola vez al montar
   useEffect(() => {
@@ -385,7 +409,9 @@ export default function App() {
 
       const isSameNpc = prev.activeNpc && prev.activeNpc.name === npc.name;
       const priorDialogue = isSameNpc ? prev.activeNpc!.dialogue ?? [] : [];
-      const dialogue = npc.dialogue ? [...priorDialogue, npc.dialogue].slice(-20) : priorDialogue;
+      const dialogue = npc.dialogue
+        ? [...priorDialogue, { speaker: 'npc' as const, text: npc.dialogue }].slice(-40)
+        : priorDialogue;
 
       const activeNpc: ActiveNpc = {
         name: npc.name || prev.activeNpc?.name || 'Stranger',
@@ -398,6 +424,50 @@ export default function App() {
     });
   };
 
+  // Narrator-driven tools: discrete, explicit actions the model states directly.
+  // Shared by both the main narrator input and the direct NPC chat below —
+  // an NPC can hand over an item or update the objective just like the narrator can.
+  const applyToolCalls = (toolCalls: any[]) => {
+    toolCalls.forEach((call: any) => {
+      if (call.name === 'addItem') {
+         setGame(prev => ({ ...prev, inventory: [...prev.inventory, call.args] }));
+      }
+      if (call.name === 'dropItem') {
+         setGame(prev => {
+           const newInv = [...prev.inventory];
+           if (newInv.length > 0 && call.args.index < newInv.length) {
+              newInv.splice(call.args.index, 1);
+           }
+           return { ...prev, inventory: newInv };
+         });
+         setSelectedItemIndex(null);
+      }
+      if (call.name === 'setObjective') {
+         setGame(prev => ({ ...prev, objective: call.args.objective ?? prev.objective }));
+      }
+      if (call.name === 'remember') {
+         setGame(prev => ({
+           ...prev,
+           worldNotes: call.args.note ? [...prev.worldNotes, call.args.note].slice(-20) : prev.worldNotes,
+         }));
+      }
+    });
+  };
+
+  const buildContext = (): LLMContext => ({
+    hp: game.hp,
+    hpMax: game.hpMax,
+    xp: game.xp,
+    xpMax: game.xpMax,
+    level: game.level,
+    stats: game.stats,
+    location: game.location,
+    inventory: game.inventory,
+    objective: game.objective,
+    worldNotes: game.worldNotes,
+    worldMapSummary: summarizeMap(map, game.location),
+  });
+
   // LLM Submit Prompt integrado
   const submitPrompt = async (text: string) => {
     if (!text.trim() || isThinking) return;
@@ -406,50 +476,14 @@ export default function App() {
     setInput('');
     setIsThinking(true);
 
-    const context: LLMContext = {
-      hp: game.hp,
-      hpMax: game.hpMax,
-      xp: game.xp,
-      xpMax: game.xpMax,
-      level: game.level,
-      stats: game.stats,
-      location: game.location,
-      inventory: game.inventory,
-      objective: game.objective,
-      worldNotes: game.worldNotes,
-      worldMapSummary: summarizeMap(map, game.location),
-    };
+    const context = buildContext();
     const width = map[0]?.length ?? 10;
     const height = map.length;
 
     try {
       const response = await fetchLlmResponse(text, context);
 
-      // Narrator-driven tools: discrete, explicit actions the model states directly.
-      response.toolCalls.forEach((call: any) => {
-        if (call.name === 'addItem') {
-           setGame(prev => ({ ...prev, inventory: [...prev.inventory, call.args] }));
-        }
-        if (call.name === 'dropItem') {
-           setGame(prev => {
-             const newInv = [...prev.inventory];
-             if (newInv.length > 0 && call.args.index < newInv.length) {
-                newInv.splice(call.args.index, 1);
-             }
-             return { ...prev, inventory: newInv };
-           });
-           setSelectedItemIndex(null);
-        }
-        if (call.name === 'setObjective') {
-           setGame(prev => ({ ...prev, objective: call.args.objective ?? prev.objective }));
-        }
-        if (call.name === 'remember') {
-           setGame(prev => ({
-             ...prev,
-             worldNotes: call.args.note ? [...prev.worldNotes, call.args.note].slice(-20) : prev.worldNotes,
-           }));
-        }
-      });
+      applyToolCalls(response.toolCalls);
 
       // NPC profile/dialogue is a first-class part of the narrator's response
       // (not narration text) — route it straight to the NPC panel, whether
@@ -471,6 +505,58 @@ export default function App() {
         .catch((error) => console.error('Turn analysis failed:', error));
     } catch (e) {
       setChat((prev) => [...prev, { role: 'SYSTEM', text: 'ERR: LLM connection failed.' }]);
+      setIsThinking(false);
+    }
+  };
+
+  // Talking straight to the active NPC — a separate channel from the main
+  // narrator input. Both the player's line and the NPC's reply stay below
+  // the NPC's head (see applyNpcUpdate) and never touch the narrator log,
+  // per how the NPC panel is meant to work.
+  const submitNpcMessage = async (text: string) => {
+    if (!text.trim() || isThinking || !game.activeNpc) return;
+    const npcName = game.activeNpc.name;
+
+    setGame((prev) =>
+      prev.activeNpc
+        ? { ...prev, activeNpc: { ...prev.activeNpc, dialogue: [...prev.activeNpc.dialogue, { speaker: 'player' as const, text }].slice(-40) } }
+        : prev,
+    );
+    setNpcInput('');
+    setIsThinking(true);
+
+    const context = buildContext();
+    const width = map[0]?.length ?? 10;
+    const height = map.length;
+
+    try {
+      const response = await fetchLlmResponse(`(The player speaks directly to ${npcName}): "${text}"`, context);
+
+      applyToolCalls(response.toolCalls);
+
+      // The player explicitly addressed this NPC, so it stays on screen
+      // regardless of what `npc.present` says this turn — unlike the general
+      // per-turn flow (applyNpcUpdate), a connection/config error or the
+      // model forgetting to reconfirm presence shouldn't wipe the NPC out
+      // mid-conversation. Fall back to the story text (e.g. the "not
+      // configured" message) if there's no dialogue to show.
+      const replyText = response.npc.dialogue || response.story;
+      setGame((prev) =>
+        prev.activeNpc && prev.activeNpc.name === npcName
+          ? { ...prev, activeNpc: { ...prev.activeNpc, dialogue: [...prev.activeNpc.dialogue, { speaker: 'npc' as const, text: replyText }].slice(-40) } }
+          : prev,
+      );
+      setIsThinking(false);
+
+      analyzeNarratorTurn(`(spoke to ${npcName}) ${text}`, response.story, context)
+        .then((analysis) => applyTurnAnalysis(analysis, width, height))
+        .catch((error) => console.error('Turn analysis failed:', error));
+    } catch (e) {
+      setGame((prev) =>
+        prev.activeNpc
+          ? { ...prev, activeNpc: { ...prev.activeNpc, dialogue: [...prev.activeNpc.dialogue, { speaker: 'npc' as const, text: '(...no response)' }].slice(-40) } }
+          : prev,
+      );
       setIsThinking(false);
     }
   };
@@ -505,7 +591,7 @@ export default function App() {
     const npcName = npcProfiles[Math.floor(seed * npcProfiles.length)] ?? 'DESCONOCIDO';
     setGame((prev) => ({
       ...prev,
-      activeNpc: { name: npcName, description: '(Debug) Manually spawned test NPC.', seed, dialogue: ['...'] },
+      activeNpc: { name: npcName, description: '(Debug) Manually spawned test NPC.', seed, dialogue: [] },
     }));
     setChat((prev) => [...prev, { role: 'SYSTEM', text: `[TOOL] NPC spawn -> ${npcName}` }]);
   };
@@ -901,9 +987,9 @@ export default function App() {
               )}
             </div>
 
-            {/* NPC profile + everything it says lives here, below its head —
+            {/* NPC profile + the whole exchange lives here, below its head —
                 never in the narrator log, whether the narrator is describing
-                the NPC or the player is talking to it directly. */}
+                the NPC or the player is talking to it directly below. */}
             {game.activeNpc && (
               <div className="npc-dialogue-panel">
                 <div className="npc-profile">
@@ -912,15 +998,37 @@ export default function App() {
                     <p className="npc-description">{game.activeNpc.description}</p>
                   )}
                 </div>
-                <div className="npc-dialogue-log">
+                <div className="npc-dialogue-log" ref={npcLogRef}>
                   {(game.activeNpc.dialogue?.length ?? 0) > 0 ? (
-                    game.activeNpc.dialogue.map((line, index) => (
-                      <p key={index} className="npc-dialogue-line">&ldquo;{line}&rdquo;</p>
-                    ))
+                    game.activeNpc.dialogue.map((entry, index) =>
+                      entry.speaker === 'player' ? (
+                        <p key={index} className="npc-dialogue-line npc-dialogue-player">&gt; {entry.text}</p>
+                      ) : (
+                        <p key={index} className="npc-dialogue-line">&ldquo;{entry.text}&rdquo;</p>
+                      ),
+                    )
                   ) : (
                     <p className="npc-dialogue-line npc-dialogue-empty">...</p>
                   )}
+                  {isThinking && game.activeNpc && (
+                    <p className="npc-dialogue-line npc-dialogue-empty">...</p>
+                  )}
                 </div>
+                <form
+                  className="npc-input-row"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (npcInput.trim()) submitNpcMessage(npcInput.trim());
+                  }}
+                >
+                  <span className="prompt">&gt;</span>
+                  <input
+                    value={npcInput}
+                    onChange={(event) => setNpcInput(event.target.value)}
+                    disabled={isThinking}
+                    placeholder={`Say something to ${game.activeNpc.name}...`}
+                  />
+                </form>
               </div>
             )}
 
@@ -1008,8 +1116,8 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
       // Float bob: slow sine wave on screen Y
       const bob = Math.sin(time * 0.0018 + seed * 100) * 5;
       return {
-        x: yawX * 1150 / depth - 50,
-        y: -(pitchY * 1150 / depth) + bob + 157,
+        x: yawX * 1150 / depth,
+        y: -(pitchY * 1150 / depth) + bob,
         z: depth,
       };
     };
@@ -1021,7 +1129,31 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
       ctx.fillStyle = 'rgba(0,0,0,0.88)';
       ctx.fillRect(0, 0, width, height);
 
-      const points = model.vertices.map((vertex) => project(vertex, time));
+      const rawPoints = model.vertices.map((vertex) => project(vertex, time));
+
+      // Auto-fit the mesh to whatever size the NPC panel currently has,
+      // instead of relying on fixed pixel offsets tuned for one canvas size
+      // — those cropped the head whenever the panel was shorter/narrower
+      // than the size they were tuned for.
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      rawPoints.forEach((p) => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      const meshWidth = maxX - minX || 1;
+      const meshHeight = maxY - minY || 1;
+      const meshCenterX = (minX + maxX) / 2;
+      const meshCenterY = (minY + maxY) / 2;
+      const padding = 0.85;
+      const scale = Math.min((width * padding) / meshWidth, (height * padding) / meshHeight, 1);
+
+      const points = rawPoints.map((p) => ({
+        x: (p.x - meshCenterX) * scale,
+        y: (p.y - meshCenterY) * scale,
+        z: p.z,
+      }));
       const cx = width / 2;
       const cy = height / 2;
 

@@ -289,7 +289,7 @@ button:hover {
 .npc-frame {
   padding: 10px;
   flex: 1;
-  min-height: 220px;
+  min-height: 240px;
 }
 
 .npc-dialogue-panel {
@@ -298,8 +298,6 @@ button:hover {
   gap: 8px;
   padding: 10px;
   border-top: 1px dashed rgba(51, 255, 0, 0.3);
-  max-height: 180px;
-  overflow-y: auto;
   flex-shrink: 0;
 }
 
@@ -326,6 +324,8 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 130px;
+  overflow-y: auto;
 }
 
 .npc-dialogue-line {
@@ -335,8 +335,29 @@ button:hover {
   line-height: 1.4;
 }
 
+.npc-dialogue-player {
+  color: #a4ff9c;
+}
+
 .npc-dialogue-empty {
   opacity: 0.4;
+}
+
+.npc-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px dashed rgba(51, 255, 0, 0.3);
+  padding-top: 8px;
+}
+
+.npc-input-row input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #33ff00;
+  font: inherit;
 }
 
 .logo-screen {
