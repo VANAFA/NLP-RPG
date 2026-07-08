@@ -1,12 +1,19 @@
 """Local inference server for the NLP-RPG narrator LLM.
 
 Loads the Qwen3-4B-Instruct-2507 base model plus the fireball-nlp
-fireball-qwen3-4b-lora-10k LoRA adapter, and exposes it over HTTP so the
-Vite/React frontend (or a Cloudflare tunnel in front of it) can call it.
+fireball-qwen3-4b-lora-10k LoRA adapter, and exposes an OpenAI-compatible
+`/v1/chat/completions` endpoint matching what src/llmService.ts expects
+(the same shape the Kaggle/vLLM notebook target uses), so this server can
+be run locally (optionally behind a tunnel) as a drop-in replacement: just
+paste this server's URL into the app's settings (gear icon) panel.
 """
 
+import json
+import re
 import threading
-from typing import Dict, List, Optional
+import time
+import uuid
+from typing import List, Optional
 
 import torch
 from fastapi import FastAPI
@@ -17,15 +24,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 BASE_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 ADAPTER = "fireball-nlp/fireball-qwen3-4b-lora-10k"
-MAX_NEW_TOKENS = 300
-
-SYSTEM_PROMPT = (
-    "Sos el narrador de un RPG estilo terminal DOS retro. Describis el mundo, "
-    "reaccionas a las acciones del jugador y controlas a los NPCs de forma "
-    "coherente con el estado de juego (ubicacion, HP, XP, nivel, stats, "
-    "inventario y NPC activo) que se te da como contexto. Respondes en "
-    "castellano, en tono narrativo breve y directo, sin salirte del personaje."
-)
+MODEL_NAME = "fireball-qwen3-4b-lora-10k"
+MAX_TOKENS_CAP = 2048
 
 app = FastAPI(title="NLP-RPG Narrator LLM")
 
@@ -50,60 +50,21 @@ model.eval()
 generate_lock = threading.Lock()
 
 
-class Location(BaseModel):
-    x: int
-    y: int
-    label: str
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 
 
-class InventoryItem(BaseModel):
-    name: str
-    quantity: int
-    kind: str
+class ChatCompletionRequest(BaseModel):
+    model: Optional[str] = None
+    messages: List[ChatMessage]
+    temperature: float = 0.7
+    max_tokens: int = 512
 
 
-class ActiveNpc(BaseModel):
-    name: str
-    title: str
-    seed: float
-
-
-class ChatRequest(BaseModel):
-    instruction: str
-    location: Location
-    hp: str
-    level: int
-    xp: str
-    stats: Dict[str, int]
-    inventory: List[InventoryItem]
-    activeNpc: Optional[ActiveNpc] = None
-
-
-def build_user_prompt(req: ChatRequest) -> str:
-    inventory_desc = (
-        ", ".join(f"{item.name} x{item.quantity} ({item.kind})" for item in req.inventory)
-        or "vacio"
-    )
-    stats_desc = ", ".join(f"{name}: {value}" for name, value in req.stats.items())
-    npc_desc = (
-        f"{req.activeNpc.name} ({req.activeNpc.title})" if req.activeNpc else "ninguno"
-    )
-
-    return (
-        f"[ESTADO] ubicacion: {req.location.label} ({req.location.x},{req.location.y}) | "
-        f"HP: {req.hp} | nivel: {req.level} | XP: {req.xp} | stats: {stats_desc} | "
-        f"inventario: {inventory_desc} | NPC activo: {npc_desc}\n"
-        f"[JUGADOR] {req.instruction}"
-    )
-
-
-def generate_reply(user_prompt: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
+def generate_reply(messages: List[ChatMessage], temperature: float, max_tokens: int) -> str:
     inputs = tokenizer.apply_chat_template(
-        messages,
+        [{"role": m.role, "content": m.content} for m in messages],
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
@@ -113,9 +74,9 @@ def generate_reply(user_prompt: str) -> str:
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=True,
-            temperature=0.8,
+            max_new_tokens=min(max_tokens, MAX_TOKENS_CAP),
+            do_sample=temperature > 0,
+            temperature=max(temperature, 0.01),
             top_p=0.9,
             pad_token_id=tokenizer.eos_token_id,
         )
@@ -124,14 +85,44 @@ def generate_reply(user_prompt: str) -> str:
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
+def normalize_content(text: str) -> str:
+    """Ensure the response is always the {thinking, story, toolCalls} JSON
+    contract llmService.ts expects, even when the model answers in plain
+    narrative text instead of structured JSON (it often does)."""
+    stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict) and "story" in parsed:
+            return stripped
+    except json.JSONDecodeError:
+        pass
+
+    return json.dumps({"thinking": "", "story": stripped, "toolCalls": []}, ensure_ascii=False)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.post("/api/chat")
-def chat(req: ChatRequest):
-    user_prompt = build_user_prompt(req)
+@app.post("/v1/chat/completions")
+def chat_completions(req: ChatCompletionRequest):
     with generate_lock:
-        text = generate_reply(user_prompt)
-    return {"text": text}
+        text = generate_reply(req.messages, req.temperature, req.max_tokens)
+
+    content = normalize_content(text)
+
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": MODEL_NAME,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+    }
