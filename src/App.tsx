@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchLlmResponse, LS_BASE_URL_KEY, LS_API_KEY_KEY } from './llmService';
+import { useEffect, useRef, useState } from 'react';
+import { fetchLlmResponse, generateNewCharacter, LS_BASE_URL_KEY, LS_API_KEY_KEY, type LLMContext } from './llmService';
 
 type StatName = 'Strength' | 'Perception' | 'Endurance' | 'Charisma' | 'Intelligence' | 'Agility' | 'Luck';
 type InventoryItem = { name: string; quantity: number; kind: string; desc?: string };
@@ -33,7 +33,11 @@ type GameState = {
   location: { x: number; y: number; label: string };
   inventory: InventoryItem[];
   activeNpc: null | { name: string; title: string; seed: number };
+  objective: string;
+  worldNotes: string[];
 };
+
+const SAVE_KEY = 'nlprpg.save';
 
 const getTerrainVisual = (terrain: TerrainType) => {
   switch (terrain) {
@@ -82,6 +86,8 @@ const initialState: GameState = {
     { name: 'Medkit', quantity: 2, kind: 'consumable', desc: '> Restaura 50 HP.' },
   ],
   activeNpc: null,
+  objective: 'Sobrevivir y descubrir qué pasó en este lugar.',
+  worldNotes: [],
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -119,6 +125,18 @@ function makeMap(width: number, height: number): MapCell[][] {
   map[1][1].terrain = 'village';
   
   return map;
+}
+
+function summarizeMap(map: MapCell[][], location: { x: number; y: number }): string {
+  const height = map.length;
+  const width = map[0]?.length ?? 0;
+  const notable: string[] = [];
+
+  map.forEach((row) => row.forEach((cell) => {
+    if (cell.terrain !== 'plain') notable.push(`(${cell.x},${cell.y}):${cell.terrain}`);
+  }));
+
+  return `Grilla ${width}x${height}. Jugador en (${location.x},${location.y}). Puntos notables: ${notable.join(', ') || 'ninguno'}.`;
 }
 
 function parseObjModel(text: string): ObjGeometry {
@@ -199,12 +217,13 @@ export default function App() {
   };
 
   const [input, setInput] = useState('');
-  const [chat, setChat] = useState<ChatEntry[]>([
-    { role: 'SYSTEM', text: 'C:\\> SISTEMA INICIADO. IA ENLACE ESTABLECIDO.' },
-    { role: 'Narrator', story: 'Te despiertas en una habitación oscura. ¿Qué haces?', thinking: '[SISTEMA INTERNO]\nIniciando secuencia de despertar.' },
-  ]);
-  const map = useMemo(() => makeMap(10, 8), []);
+  const [chat, setChat] = useState<ChatEntry[]>([]);
+  const [map, setMap] = useState<MapCell[][]>(() => makeMap(10, 8));
+  const [isInitializing, setIsInitializing] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
+  // React 18 StrictMode double-invokes mount effects in dev; without this
+  // guard that would fire two concurrent character-generation requests.
+  const hasInitializedRef = useRef(false);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
@@ -216,25 +235,97 @@ export default function App() {
     setApiKeyInput(localStorage.getItem(LS_API_KEY_KEY) ?? '');
   }, []);
 
+  // Arranca una partida nueva: le pide al LLM que invente personaje, stats,
+  // inventario, ubicación y objetivo. Si el LLM no está configurado o falla,
+  // cae al personaje por defecto para que el juego siga siendo jugable.
+  const startNewGame = async () => {
+    setIsInitializing(true);
+    const freshMap = makeMap(10, 8);
+
+    try {
+      const mapSummary = summarizeMap(freshMap, { x: 0, y: 0 });
+      const character = await generateNewCharacter(mapSummary);
+      const width = freshMap[0]?.length ?? 10;
+      const height = freshMap.length;
+
+      const newGameState: GameState = {
+        hp: 100,
+        hpMax: 100,
+        xp: 0,
+        xpMax: 100,
+        level: 1,
+        statPoints: 0,
+        stats: character.stats as GameState['stats'],
+        location: {
+          x: clamp(character.location.x, 0, width - 1),
+          y: clamp(character.location.y, 0, height - 1),
+          label: character.location.label,
+        },
+        inventory: character.inventory,
+        activeNpc: null,
+        objective: character.objective,
+        worldNotes: [],
+      };
+
+      setGame(newGameState);
+      setMap(freshMap);
+      setChat([
+        { role: 'SYSTEM', text: 'C:\\> SISTEMA INICIADO. IA ENLACE ESTABLECIDO.' },
+        { role: 'Narrator', story: character.story, thinking: '[SISTEMA INTERNO]\nPersonaje generado por el Game Master.' },
+      ]);
+    } catch (error) {
+      console.error('Character generation failed:', error);
+      setGame(initialState);
+      setMap(freshMap);
+      setChat([
+        { role: 'SYSTEM', text: 'C:\\> SISTEMA INICIADO. IA ENLACE ESTABLECIDO.' },
+        { role: 'SYSTEM', text: '[SYSTEM] No se pudo generar un personaje via LLM (¿configuraste ⚙ LINK?). Usando personaje por defecto.' },
+        { role: 'Narrator', story: 'Te despiertas en una habitación oscura. ¿Qué haces?', thinking: '[SISTEMA INTERNO]\nIniciando secuencia de despertar.' },
+      ]);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // Al montar: intenta cargar una partida guardada; si no hay, genera una nueva.
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
+    const saved = localStorage.getItem(SAVE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setGame(parsed.game);
+        setChat(parsed.chat);
+        setMap(parsed.map);
+        setIsInitializing(false);
+        return;
+      } catch {
+        // Guardado corrupto: seguimos a generar una partida nueva.
+      }
+    }
+    startNewGame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persiste la partida en cada cambio (una vez que ya terminó de inicializar).
+  useEffect(() => {
+    if (isInitializing) return;
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ game, chat, map }));
+  }, [game, chat, map, isInitializing]);
+
+  const newGame = () => {
+    localStorage.removeItem(SAVE_KEY);
+    startNewGame();
+  };
+
   const saveSettings = () => {
     localStorage.setItem(LS_BASE_URL_KEY, baseUrlInput.trim());
     localStorage.setItem(LS_API_KEY_KEY, apiKeyInput.trim());
     setIsSettingsOpen(false);
     setChat((prev) => [...prev, { role: 'SYSTEM', text: '[SYSTEM] Configuración de conexión guardada.' }]);
   };
-
-  const inventorySummary = game.inventory.map((item) => `${item.name} x${item.quantity}`).join(', ');
-
-  const contextSnapshot = () => ({
-    instruction: input.trim(),
-    location: game.location,
-    hp: `${game.hp}/${game.hpMax}`,
-    level: game.level,
-    xp: `${game.xp}/${game.xpMax}`,
-    stats: game.stats,
-    inventory: game.inventory,
-    activeNpc: game.activeNpc,
-  });
 
   // LLM Submit Prompt integrado
   const submitPrompt = async (text: string) => {
@@ -245,17 +336,31 @@ export default function App() {
     setIsThinking(true);
 
     try {
-      // 1. Llamada al servicio LLM (mock)
-      const response = await fetchLlmResponse(text, game);
+      const context: LLMContext = {
+        hp: game.hp,
+        hpMax: game.hpMax,
+        xp: game.xp,
+        xpMax: game.xpMax,
+        level: game.level,
+        stats: game.stats,
+        location: game.location,
+        inventory: game.inventory,
+        objective: game.objective,
+        worldNotes: game.worldNotes,
+        worldMapSummary: summarizeMap(map, game.location),
+      };
+      const response = await fetchLlmResponse(text, context);
+      const width = map[0]?.length ?? 10;
+      const height = map.length;
 
-      // 2. Procesamos las herramientas forzadas
+      // Procesamos las herramientas pedidas por el LLM
       response.toolCalls.forEach((call: any) => {
         if (call.name === 'move') {
            setGame(prev => ({
              ...prev,
              location: {
-               x: clamp(prev.location.x + call.args.dx, 0, 9),
-               y: clamp(prev.location.y + call.args.dy, 0, 9),
+               x: clamp(prev.location.x + call.args.dx, 0, width - 1),
+               y: clamp(prev.location.y + call.args.dy, 0, height - 1),
                label: `Sector LLM-${Math.floor(Math.random()*100)}`
              }
            }));
@@ -271,10 +376,19 @@ export default function App() {
              }
              return { ...prev, inventory: newInv };
            });
-           setSelectedItemIndex(null); 
+           setSelectedItemIndex(null);
         }
         if (call.name === 'spawnNpc') {
            spawnNpc();
+        }
+        if (call.name === 'setObjective') {
+           setGame(prev => ({ ...prev, objective: call.args.objective ?? prev.objective }));
+        }
+        if (call.name === 'remember') {
+           setGame(prev => ({
+             ...prev,
+             worldNotes: call.args.note ? [...prev.worldNotes, call.args.note].slice(-20) : prev.worldNotes,
+           }));
         }
       });
 
@@ -327,6 +441,18 @@ export default function App() {
     setChat((prev) => [...prev, { role: 'SYSTEM', text: '[TOOL] NPC control returned to narrator LLM' }]);
   };
 
+  if (isInitializing) {
+    return (
+      <div className="app-shell">
+        <div className="scanlines" />
+        <div className="logo-screen" style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+          <div className="logo">NLP-RPG</div>
+          <div className="logo-sub">Generando personaje...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <div className="scanlines" />
@@ -371,6 +497,24 @@ export default function App() {
           ⚙ LINK
         </button>
 
+        {/* BOTÓN PARA REINICIAR LA PARTIDA CON UN PERSONAJE NUEVO */}
+        <button
+          onClick={() => {
+            if (window.confirm('¿Empezar una partida nueva? Se perderá el progreso actual.')) newGame();
+          }}
+          style={{
+            backgroundColor: 'transparent',
+            color: '#ff5555',
+            border: '1px solid #ff5555',
+            padding: '0.2rem 1rem',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontFamily: 'inherit'
+          }}
+        >
+          ⟳ NEW GAME
+        </button>
+
         <div className="top-meter top-meter-right">
           <span className="top-meter-label">HP</span>
           <div className="top-meter-track">
@@ -412,6 +556,9 @@ export default function App() {
       <main className="layout">
         <section className="left-rail panel">
           <div className="panel-title">NARRATOR LOG</div>
+          <div style={{ padding: '0.3rem 0.5rem', borderBottom: '1px dashed rgba(51,255,0,0.3)', fontSize: '0.85rem', opacity: 0.85 }}>
+            <strong>OBJETIVO:</strong> {game.objective || 'Sin objetivo definido.'}
+          </div>
           <div className="chat-log" ref={logRef}>
             {chat.map((entry, index) => {
               // RENDERIZADO ESPECIAL PARA EL LLM

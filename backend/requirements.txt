@@ -4,3 +4,4 @@ accelerate>=0.30.0
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 pydantic>=2.0
+lm-format-enforcer>=0.10.0
