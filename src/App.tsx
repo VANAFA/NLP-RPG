@@ -113,6 +113,25 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+// Saves from before the NPC panel rework stored activeNpc as
+// { name, title, seed } with no `dialogue` array. Loading one of those as-is
+// crashed the whole app the moment the NPC panel tried to read
+// `.dialogue.length` on `undefined` — with no error boundary, that left a
+// blank black screen (the page's own background color) instead of the game.
+// Normalizing legacy saves on load keeps old saves usable instead of bricking them.
+function normalizeActiveNpc(raw: unknown): ActiveNpc | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as Partial<ActiveNpc> & { name?: unknown };
+  if (typeof candidate.name !== 'string' || !candidate.name) return null;
+
+  return {
+    name: candidate.name,
+    description: typeof candidate.description === 'string' ? candidate.description : '',
+    seed: typeof candidate.seed === 'number' ? candidate.seed : Math.random(),
+    dialogue: Array.isArray(candidate.dialogue) ? candidate.dialogue.filter((line) => typeof line === 'string') : [],
+  };
+}
+
 // Novice-level character: each stat rolled 1-6, so every new game starts weak.
 function randomizeLowStats(): GameState['stats'] {
   const stats = {} as GameState['stats'];
@@ -286,7 +305,7 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setGame(parsed.game);
+        setGame({ ...parsed.game, activeNpc: normalizeActiveNpc(parsed.game?.activeNpc) });
         setChat(parsed.chat);
         setMap(parsed.map);
         setIsInitializing(false);
@@ -365,7 +384,7 @@ export default function App() {
       }
 
       const isSameNpc = prev.activeNpc && prev.activeNpc.name === npc.name;
-      const priorDialogue = isSameNpc ? prev.activeNpc!.dialogue : [];
+      const priorDialogue = isSameNpc ? prev.activeNpc!.dialogue ?? [] : [];
       const dialogue = npc.dialogue ? [...priorDialogue, npc.dialogue].slice(-20) : priorDialogue;
 
       const activeNpc: ActiveNpc = {
@@ -894,7 +913,7 @@ export default function App() {
                   )}
                 </div>
                 <div className="npc-dialogue-log">
-                  {game.activeNpc.dialogue.length > 0 ? (
+                  {(game.activeNpc.dialogue?.length ?? 0) > 0 ? (
                     game.activeNpc.dialogue.map((line, index) => (
                       <p key={index} className="npc-dialogue-line">&ldquo;{line}&rdquo;</p>
                     ))

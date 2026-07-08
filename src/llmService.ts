@@ -182,6 +182,8 @@ Respond ONLY with a JSON object matching the requested schema, written entirely 
 
 IMPORTANT — NPC dialogue goes in a separate field, never in "story": "story" is ONLY for scene, environment, and action narration. If an NPC is present and speaking this turn (including if the player is directly addressing one), set npc.present to true, give them a name and a short profile description (appearance/role/personality — invent one the first time they appear, then stay consistent with it), and write what they say aloud in npc.dialogue. NEVER put an NPC's spoken words inside "story". If no NPC is present or speaking, set npc.present to false and leave name/description/dialogue as empty strings.
 
+IMPORTANT — "thinking" is YOUR private Game Master scratchpad, not narration and not the player's inner voice. Use it to briefly track continuity or reasoning as the GM: what you're keeping consistent, what you're planning to introduce next, why something just happened. Write it in third person, from the GM's point of view, about the world and the player character — NEVER in first person as if you were the player (no "I will...", no "I wonder...", no "I don't know what I'll do..."). It is never shown to the player.
+
 -- Current Game State --
 - HP: ${context.hp}/${context.hpMax} | Level: ${context.level} | XP: ${context.xp}/${context.xpMax}
 - Location: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
@@ -327,7 +329,7 @@ async function getLocationChange(
   context: LLMContext,
 ): Promise<{ locationChanged: boolean; location: { x: number; y: number; label: string } }> {
   const systemPrompt = `You are the map tracker for a fantasy RPG. Always respond in English.
-Read the narrator's response, the player's current location, and the world map. Be CONSERVATIVE: only set locationChanged to true if the narrator's response clearly states the player arrived somewhere new. Movement that is only described as heading toward / walking in the direction of a place, without confirming arrival, does NOT count as a change — keep locationChanged false and repeat the current coordinates in that case. When arrival at a notable place from the map is confirmed, use that place's exact coordinates rather than inventing new ones. Coordinates must stay within the map's bounds (X: 0-9, Y: 0-7).
+Read the narrator's response, the player's current location, and the world map, then decide where the player is now. You have full freedom to place the player wherever best fits the story — including indoor or freeform locations (a room, a cellar, a courtyard, a cave) that aren't one of the map's named outdoor landmarks; don't limit yourself to only the landmarks listed. When the player clearly arrives at one of the map's named landmarks, use that landmark's exact coordinates; otherwise pick whatever nearby coordinates best represent where the scene is now taking place, moving them as far as the story implies. Movement that is only described as heading toward / walking in the direction of a place, without confirming arrival, does NOT count as a change yet — keep locationChanged false and repeat the current coordinates in that case. Coordinates must stay within the map's bounds (X: 0-9, Y: 0-7).
 
 Current location: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
 Map: ${context.worldMapSummary}
