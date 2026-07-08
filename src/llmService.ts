@@ -107,7 +107,7 @@ const CHARACTER_CREATION_SCHEMA = {
   required: ['stats', 'inventory', 'location', 'objective', 'story'],
 };
 
-async function callLlm(systemPrompt: string, userText: string, schema: object, temperature: number, maxTokens: number) {
+async function callLlmOnce(systemPrompt: string, userText: string, schema: object, temperature: number, maxTokens: number) {
   const baseUrl = localStorage.getItem(LS_BASE_URL_KEY);
   if (!baseUrl) {
     throw new Error('LLM_NOT_CONFIGURED');
@@ -119,7 +119,7 @@ async function callLlm(systemPrompt: string, userText: string, schema: object, t
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Evita la página de advertencia HTML que ngrok free tier muestra a navegaciones de browser.
+      // Avoids the HTML warning page ngrok's free tier shows to browser navigations.
       'ngrok-skip-browser-warning': 'true',
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
@@ -150,33 +150,47 @@ async function callLlm(systemPrompt: string, userText: string, schema: object, t
   return JSON.parse(rawContent);
 }
 
+// Occasionally the model still runs out of its token budget mid-string
+// despite the maxLength caps in the schema, leaving invalid JSON. One retry
+// is a cheap way to paper over that intermittent case before giving up.
+async function callLlm(systemPrompt: string, userText: string, schema: object, temperature: number, maxTokens: number) {
+  try {
+    return await callLlmOnce(systemPrompt, userText, schema, temperature, maxTokens);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'LLM_NOT_CONFIGURED') throw error;
+    return await callLlmOnce(systemPrompt, userText, schema, temperature, maxTokens);
+  }
+}
+
 function buildTurnSystemPrompt(context: LLMContext): string {
   const inventoryDesc = context.inventory.length
     ? context.inventory.map((item) => `${item.name} x${item.quantity}`).join(', ')
-    : 'vacío';
-  const notesDesc = context.worldNotes.length ? context.worldNotes.join(' | ') : 'ninguna';
+    : 'empty';
+  const notesDesc = context.worldNotes.length ? context.worldNotes.join(' | ') : 'none';
 
-  return `Sos el Game Master de un RPG de terminal retro oscuro. Narrás el mundo, reaccionás a las acciones del jugador, y usás herramientas (toolCalls) para modificar el estado del juego cuando corresponda.
-Respondé ÚNICAMENTE con un objeto JSON matching el schema pedido.
+  return `IMPORTANT: You must write ONLY in English. Never use Spanish or any other language. All text you generate (thinking, story, item names, notes) must be in English, no exceptions.
 
--- Estado Actual del Juego --
-- HP: ${context.hp}/${context.hpMax} | Nivel: ${context.level} | XP: ${context.xp}/${context.xpMax}
-- Ubicación: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
+You are the Game Master of a dark, retro-terminal RPG. You narrate the world, react to the player's actions, and use tools (toolCalls) to modify the game state when appropriate.
+Respond ONLY with a JSON object matching the requested schema, written entirely in English.
+
+-- Current Game State --
+- HP: ${context.hp}/${context.hpMax} | Level: ${context.level} | XP: ${context.xp}/${context.xpMax}
+- Location: ${context.location.label} [X:${context.location.x}, Y:${context.location.y}]
 - Stats: ${JSON.stringify(context.stats)}
-- Inventario: ${inventoryDesc}
-- Objetivo actual: ${context.objective}
-- Notas del mundo (hechos que ya estableciste, no los contradigas): ${notesDesc}
-- Mapa: ${context.worldMapSummary}
+- Inventory: ${inventoryDesc}
+- Current objective: ${context.objective}
+- World notes (facts you already established, do not contradict them): ${notesDesc}
+- Map: ${context.worldMapSummary}
 
-Herramientas disponibles:
+Available tools:
 1. {"name": "move", "args": {"dx": number, "dy": number}}
 2. {"name": "addItem", "args": {"name": string, "quantity": number, "kind": string, "desc": string}}
 3. {"name": "dropItem", "args": {"index": number}}
 4. {"name": "spawnNpc", "args": {}}
-5. {"name": "setObjective", "args": {"objective": string}} — usalo cuando el objetivo del jugador cambie o se complete
-6. {"name": "remember", "args": {"note": string}} — usalo para anotar hechos del mundo que inventes (nombres de NPCs, lugares, trama) para no olvidarlos en turnos futuros
+5. {"name": "setObjective", "args": {"objective": string}} — use it when the player's objective changes or is completed
+6. {"name": "remember", "args": {"note": string}} — use it to note world facts you invent (NPC names, places, plot) so you don't forget them in future turns
 
-CRÍTICO: Devolvé SOLO el JSON.`;
+CRITICAL: Return ONLY the JSON.`;
 }
 
 export async function fetchLlmResponse(userText: string, context: LLMContext) {
@@ -191,8 +205,8 @@ export async function fetchLlmResponse(userText: string, context: LLMContext) {
   } catch (error) {
     if (error instanceof Error && error.message === 'LLM_NOT_CONFIGURED') {
       return {
-        thinking: '[CONFIG] No se ha configurado la URL del servidor.',
-        story: 'El enlace con el Game Master no está configurado. Abrí los ajustes (⚙ LINK) e ingresá la URL de tu servidor.',
+        thinking: '[CONFIG] The server URL has not been configured.',
+        story: 'The link to the Game Master is not configured. Open settings (⚙ LINK) and enter your server URL.',
         toolCalls: [],
       };
     }
@@ -200,33 +214,35 @@ export async function fetchLlmResponse(userText: string, context: LLMContext) {
     console.error('LLM Connection Error:', error);
     return {
       thinking: `[CRITICAL ERROR]\nDetails: ${error}`,
-      story: 'La conexión con el Game Master se ha perdido. Verificá que el servidor esté encendido y que la URL en ⚙ LINK sea la correcta.',
+      story: 'The connection to the Game Master has been lost. Check that the server is running and that the URL in ⚙ LINK is correct.',
       toolCalls: [],
     };
   }
 }
 
 export async function generateNewCharacter(worldMapSummary: string): Promise<NewCharacter> {
-  const systemPrompt = `Sos el Game Master creando un nuevo personaje para arrancar una partida de un RPG de terminal retro oscuro.
-Inventá un personaje coherente: quién es, cuál es su situación actual, y su primer objetivo.
+  const systemPrompt = `IMPORTANT: You must write ONLY in English. Never use Spanish or any other language. All text you generate (item names, descriptions, objective, story) must be in English, no exceptions.
 
-Reglas:
-- Stats (Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck): personaje NOVATO, cada stat entre 1 y 6, sin superar un total aproximado de 22-26 puntos entre las 7. No es un héroe poderoso, es alguien común arrancando su historia.
-- Inventory: 2 a 4 objetos lógicos para ese personaje y su situación (con nombre, cantidad, tipo, y una descripción breve de una frase).
-- Location: elegí una celda del mapa (coordenadas dentro del rango disponible) coherente con el tipo de terreno, con una etiqueta descriptiva del lugar.
-- Objective: una frase clara y concreta de la misión u objetivo inicial del personaje.
-- Story: 2 a 4 frases narrativas en castellano presentando al jugador quién es su personaje, dónde está, y cuál es su objetivo. Este es el primer mensaje que el jugador va a leer, así que tiene que enganchar.
+You are the Game Master creating a new character to start a dark, retro-terminal RPG session.
+Invent a coherent character: who they are, their current situation, and their first objective.
 
-Mapa disponible: ${worldMapSummary}
+Rules:
+- Stats (Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck): a NOVICE character, each stat between 1 and 6, totaling roughly 22-26 points across all 7. Not a powerful hero — an ordinary person starting their story.
+- Inventory: 2 to 4 logical items for that character and their situation (with name, quantity, kind, and a brief one-sentence description) — all in English.
+- Location: pick a map cell (coordinates within the available range) consistent with the terrain type, with a descriptive label for the place, in English.
+- Objective: a clear, concrete sentence describing the character's initial mission or goal, in English.
+- Story: 2 to 4 narrative sentences in English introducing the player to who their character is, where they are, and what their objective is. This is the first message the player will read, so it needs to hook them.
 
-Respondé ÚNICAMENTE con el objeto JSON matching el schema pedido.`;
+Available map: ${worldMapSummary}
+
+Respond ONLY with the JSON object matching the requested schema, written entirely in English.`;
 
   const parsed = await callLlm(
     systemPrompt,
-    'Generá un nuevo personaje para iniciar la partida.',
+    'Generate a new character to start the game.',
     CHARACTER_CREATION_SCHEMA,
     0.9,
-    550,
+    800,
   );
 
   return {
