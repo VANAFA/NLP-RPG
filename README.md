@@ -59,15 +59,11 @@ an OpenAI-compatible `/v1/chat/completions` endpoint.
 
 ## Notes
 
-This implementation is set up so the narrator LLM can be wired to real tools later:
+The narrator responds with a schema-constrained JSON object (see `src/llmService.ts`) that can call a few tools directly:
 
-- `inventory.add`
-- `inventory.drop`
-- `player.move`
-- `player.hp.add`
-- `player.hp.remove`
-- `player.xp.add`
-- `npc.spawn`
-- `npc.release`
+- `addItem`
+- `dropItem`
+- `setObjective`
+- `remember`
 
-I recommend this stack over `ogex.app` for this use case because it is easier to control the exact UI layout, integrate LLM/tool state, and swap the NPC renderer later if you want a higher-fidelity 3D engine like `three.js` or `@react-three/fiber`.
+XP, HP, and location changes aren't tool calls — they're inferred after the fact by separate analyzer calls that read the narrator's own story text, since the narrator doesn't reliably remember to call a tool every time something happens in the narration.

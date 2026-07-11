@@ -1,4 +1,6 @@
-.ts
+node_modules/
+dist/
+llm-env/
 backend/.venv/
 backend/__pycache__/
 experiments/.env

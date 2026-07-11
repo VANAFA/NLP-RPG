@@ -2,7 +2,7 @@ name: Deploy Vite App to GitHub Pages
 
 on:
   push:
-    branches: [ "main" ] # ⚠️ Change this to "master" if your repository default branch is master
+    branches: [ "main" ] # change this if your default branch is named differently
   workflow_dispatch:
 
 # Grant the permissions required to make a Pages deployment
@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Global override to force Node 24 runtime execution
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # silences the actions runner's Node 20 deprecation warning
 
 jobs:
   deploy:
@@ -27,12 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6 # Upgraded to completely bypass Node 20 triggers
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6 # Upgraded to support Node 24 runners cleanly
+        uses: actions/setup-node@v6
         with:
-          node-version: 22 # Stable LTS Node environment for your Vite build
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
@@ -45,10 +45,10 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Upload built assets
-        uses: actions/upload-pages-artifact@v5 # Upgraded to eliminate remaining warnings
+        uses: actions/upload-pages-artifact@v5
         with:
           path: './dist' # Vite outputs production files to 'dist' by default
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5 # Upgraded version matching modern pipeline specs
+        uses: actions/deploy-pages@v5

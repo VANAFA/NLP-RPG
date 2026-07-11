@@ -12,8 +12,7 @@ type MapCell = {
   blocked: boolean;
 };
 
-// Actualizado para separar pensamiento e historia
-type ChatEntry = 
+type ChatEntry =
   | { role: 'SYSTEM' | 'PLAYER'; text: string }
   | { role: 'Narrator'; story: string; thinking: string };
 
@@ -23,10 +22,9 @@ type ObjGeometry = {
   edges: [number, number][];
 };
 
-// Everything the NPC "is" and "says" lives here — rendered below its head in
-// the NPC panel, never in the narrator log. `dialogue` accumulates each line
-// of the exchange (player and NPC alike) while it stays the same NPC (reset
-// when a different NPC takes over, see applyNpcUpdate).
+// Everything the NPC "is" and "says" — shown below its head in the NPC
+// panel, never in the narrator log. dialogue resets when a different NPC
+// takes over (see applyNpcUpdate).
 type NpcDialogueEntry = { speaker: 'npc' | 'player'; text: string };
 type ActiveNpc = {
   name: string;
@@ -76,9 +74,8 @@ const statNames: StatName[] = [
 const npcProfiles = ['OGRE', 'MERCHANT', 'SOLDIER', 'CULTIST'];
 const npcModelUrl = './basic-head-mesh.obj';
 
-// Fixed for every game: character/room intro, starting items, and starting
-// position. Only stats are randomized fresh each time (see randomizeLowStats).
-// Strictly fantasy setting — no sci-fi/tech elements.
+// Fixed intro/items/position for every game; only stats are randomized
+// (see randomizeLowStats). Strictly fantasy setting, no sci-fi elements.
 const OPENING_STORY =
   "You don't remember your name — only the cold, and the taste of ash on your tongue. You're a survivor, nothing more: no title, no banner, just the will to keep breathing.\n\n" +
   "You come to at the foot of a crumbling stone gate, half-swallowed by creeping moss and drifting fog. Torches gutter in rusted iron sconces nearby, and a faded inscription is carved into the archway above you, worn smooth by centuries. Whatever happened here, it happened long ago — and you're the only living soul in sight.";
@@ -114,20 +111,16 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-// Saves from before the NPC panel rework stored activeNpc as
-// { name, title, seed } with no `dialogue` array. Loading one of those as-is
-// crashed the whole app the moment the NPC panel tried to read
-// `.dialogue.length` on `undefined` — with no error boundary, that left a
-// blank black screen (the page's own background color) instead of the game.
-// Normalizing legacy saves on load keeps old saves usable instead of bricking them.
+// Old saves from before the NPC panel rework don't have a `dialogue` array,
+// which crashed the app on load (`.dialogue.length` on undefined). Normalize
+// on load so old saves still work.
 function normalizeActiveNpc(raw: unknown): ActiveNpc | null {
   if (!raw || typeof raw !== 'object') return null;
   const candidate = raw as { name?: unknown; description?: unknown; seed?: unknown; dialogue?: unknown };
   if (typeof candidate.name !== 'string' || !candidate.name) return null;
 
-  // `dialogue` has been through two shapes: pre-rework saves don't have it at
-  // all, and a brief in-between shape stored it as plain NPC-only strings —
-  // both need to be lifted into the current { speaker, text } entry shape.
+  // dialogue has been through two shapes over time: missing entirely, or
+  // plain strings instead of { speaker, text } — handle both.
   let dialogue: NpcDialogueEntry[] = [];
   if (Array.isArray(candidate.dialogue)) {
     dialogue = candidate.dialogue
@@ -288,8 +281,7 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const npcLogRef = useRef<HTMLDivElement>(null);
-  // React 18 StrictMode double-invokes mount effects in dev; without this
-  // guard that would fire two concurrent character-generation requests.
+  // Guards against StrictMode's double-invoked mount effect in dev.
   const hasInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -306,8 +298,7 @@ export default function App() {
     setApiKeyInput(localStorage.getItem(LS_API_KEY_KEY) ?? '');
   }, []);
 
-  // Starts a new game: character/room intro, items, and position are fixed;
-  // only stats are rolled fresh. No LLM call needed to begin playing.
+  // No LLM call needed to begin playing — only stats are rolled fresh.
   const startNewGame = () => {
     const freshMap = makeMap(10, 8);
 
@@ -360,12 +351,10 @@ export default function App() {
     setChat((prev) => [...prev, { role: 'SYSTEM', text: '[SYSTEM] Connection settings saved.' }]);
   };
 
-  // Applies the background analyzer agents' decisions (XP, HP, location)
-  // once they resolve — runs a moment after the narrator's story is already
-  // on screen, per the chosen "don't block on this" UX. NPC state is NOT
-  // handled here — it comes straight from the narrator's own response (see
-  // submitPrompt), which is more reliable than inferring it back out of
-  // already-written prose.
+  // Applies the background analyzer calls' results (XP, HP, location) once
+  // they resolve, after the story is already on screen. NPC state isn't
+  // handled here — it comes straight from the narrator's response instead
+  // (see submitPrompt).
   const applyTurnAnalysis = (analysis: TurnAnalysis, width: number, height: number) => {
     setGame((prev) => {
       let xp = prev.xp;
@@ -397,10 +386,9 @@ export default function App() {
     });
   };
 
-  // Merges the narrator's per-turn `npc` field into game state. Runs every
-  // turn: when npc.present is true we either start a fresh profile+dialogue
-  // (new NPC) or append to the current one (same NPC continuing to talk);
-  // when false, the NPC panel goes back to empty.
+  // Merges the narrator's per-turn `npc` field into game state: starts a
+  // fresh profile on a new NPC, appends dialogue for the same one, or clears
+  // the panel when npc.present is false.
   const applyNpcUpdate = (npc: NpcTurnState) => {
     setGame((prev) => {
       if (!npc.present) {
@@ -424,9 +412,8 @@ export default function App() {
     });
   };
 
-  // Narrator-driven tools: discrete, explicit actions the model states directly.
-  // Shared by both the main narrator input and the direct NPC chat below —
-  // an NPC can hand over an item or update the objective just like the narrator can.
+  // Discrete tool calls the model states directly. Shared by the main
+  // narrator input and the direct NPC chat below.
   const applyToolCalls = (toolCalls: any[]) => {
     toolCalls.forEach((call: any) => {
       if (call.name === 'addItem') {
@@ -468,7 +455,6 @@ export default function App() {
     worldMapSummary: summarizeMap(map, game.location),
   });
 
-  // LLM Submit Prompt integrado
   const submitPrompt = async (text: string) => {
     if (!text.trim() || isThinking) return;
 
@@ -485,21 +471,18 @@ export default function App() {
 
       applyToolCalls(response.toolCalls);
 
-      // NPC profile/dialogue is a first-class part of the narrator's response
-      // (not narration text) — route it straight to the NPC panel, whether
-      // the player is addressing the NPC directly or just witnessing it talk.
+      // NPC profile/dialogue goes straight to the NPC panel, not the log.
       applyNpcUpdate(response.npc);
 
-      // Show the story right away — don't make the player wait through the
-      // analyzer calls below just to read the response they're waiting on.
+      // Show the story right away, don't block on the analyzer calls below.
       setChat((prev) => [
         ...prev,
         { role: 'Narrator', story: response.story, thinking: response.thinking }
       ]);
       setIsThinking(false);
 
-      // XP/HP/location/NPC-presence are decided by dedicated analyzer calls
-      // reading the narrator's own story text, in the background.
+      // XP/HP/location are decided in the background by dedicated calls
+      // that read the narrator's story text.
       analyzeNarratorTurn(text, response.story, context)
         .then((analysis) => applyTurnAnalysis(analysis, width, height))
         .catch((error) => console.error('Turn analysis failed:', error));
@@ -509,10 +492,8 @@ export default function App() {
     }
   };
 
-  // Talking straight to the active NPC — a separate channel from the main
-  // narrator input. Both the player's line and the NPC's reply stay below
-  // the NPC's head (see applyNpcUpdate) and never touch the narrator log,
-  // per how the NPC panel is meant to work.
+  // Direct chat with the active NPC — a separate channel from the main
+  // narrator input; stays in the NPC panel and never touches the log.
   const submitNpcMessage = async (text: string) => {
     if (!text.trim() || isThinking || !game.activeNpc) return;
     const npcName = game.activeNpc.name;
@@ -534,12 +515,9 @@ export default function App() {
 
       applyToolCalls(response.toolCalls);
 
-      // The player explicitly addressed this NPC, so it stays on screen
-      // regardless of what `npc.present` says this turn — unlike the general
-      // per-turn flow (applyNpcUpdate), a connection/config error or the
-      // model forgetting to reconfirm presence shouldn't wipe the NPC out
-      // mid-conversation. Fall back to the story text (e.g. the "not
-      // configured" message) if there's no dialogue to show.
+      // The player addressed this NPC directly, so keep it on screen even if
+      // the model forgets to reconfirm npc.present this turn. Fall back to
+      // the story text (e.g. a config-error message) if there's no dialogue.
       const replyText = response.npc.dialogue || response.story;
       setGame((prev) =>
         prev.activeNpc && prev.activeNpc.name === npcName
@@ -624,9 +602,8 @@ export default function App() {
           </div>
           <span className="top-meter-value">Level {game.level}</span>
         </div>
-        
-        {/* BOTÓN TOGGLE DEBUG AL CENTRO DE LA BARRA */}
-        <button 
+
+        <button
           onClick={() => setIsDebugMode(!isDebugMode)}
           style={{ 
             backgroundColor: isDebugMode ? '#ffff00' : 'transparent', 
@@ -641,7 +618,6 @@ export default function App() {
           {isDebugMode ? 'DEBUG [ON]' : 'DEBUG [OFF]'}
         </button>
 
-        {/* BOTÓN DE AJUSTES DE CONEXIÓN AL SERVIDOR DE KAGGLE */}
         <button
           onClick={() => setIsSettingsOpen(true)}
           style={{
@@ -657,7 +633,6 @@ export default function App() {
           ⚙ LINK
         </button>
 
-        {/* BOTÓN PARA REINICIAR LA PARTIDA CON UN PERSONAJE NUEVO */}
         <button
           onClick={() => {
             if (window.confirm('Start a new game? Current progress will be lost.')) newGame();
@@ -721,7 +696,6 @@ export default function App() {
           </div>
           <div className="chat-log" ref={logRef}>
             {chat.map((entry, index) => {
-              // RENDERIZADO ESPECIAL PARA EL LLM
               if (entry.role === 'Narrator') {
                 return (
                   <div key={index} className="chat-line llm" style={{ marginBottom: '1rem', marginTop: '0.5rem' }}>
@@ -751,8 +725,7 @@ export default function App() {
                 </div>
               );
             })}
-            
-            {/* TEXTO DE PROCESAMIENTO VISUAL */}
+
             {isThinking && (
                <div style={{ opacity: 0.5, fontStyle: 'italic', marginTop: '0.5rem' }}>[ Narrator is thinking... ]</div>
             )}
@@ -799,23 +772,20 @@ export default function App() {
                         : item 
                           ? '1px solid rgba(51, 255, 0, 0.3)' 
                           : '1px dashed rgba(51, 255, 0, 0.1)',
-                      /* El hueco vacío tendrá un fondo un pelín más negro para que resalte la caja */
-                      backgroundColor: isSelected 
-                        ? 'rgba(51, 255, 0, 0.1)' 
-                        : item 
-                          ? 'transparent' 
+                      /* fondo un poco más oscuro cuando el slot está vacío, para que resalte */
+                      backgroundColor: isSelected
+                        ? 'rgba(51, 255, 0, 0.1)'
+                        : item
+                          ? 'transparent'
                           : 'rgba(0, 0, 0, 0.3)',
-                      // minHeight: '40px', /* Asegura que la caja mantenga su forma aunque no haya texto */
                       minHeight: '70px',
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'center',
                       padding: '0.5rem',
-                      /* ... tus otros estilos ... */
-                      height: '70px', /* <-- LA BALA DE PLATA: Altura estricta para llenos y vacíos */
+                      height: '70px', /* altura fija para que los slots llenos y vacíos midan igual */
                       maxHeight: '70px',
-                      overflow: 'hidden', /* Evita que si un nombre es muy largo, deforme el botón */
-                      /* ... el resto ... */
+                      overflow: 'hidden', /* nombres largos no deforman el botón */
                     }}
                   >
                     {item ? (
@@ -824,19 +794,17 @@ export default function App() {
                         <small style={{ opacity: 0.7, color: '#33ff00' }}>{item.quantity} · {item.kind}</small>
                       </>
                     ) : (
-                      /* Truco fantasma: Replicamos el DOM exacto para igualar la altura */
+                      // mismo DOM que el slot lleno, para que la altura no salte
                       <>
                         <span style={{ display: 'block', color: '#33ff00', opacity: 0.3 }}>[ Empty ]</span>
-                        {/* Este small ocupa espacio físico pero no se ve */}
-                        <small style={{ opacity: 0 }}>-</small> 
+                        <small style={{ opacity: 0 }}>-</small>
                       </>
                     )}
                   </button>
                 );
               })}
             </div>
-            
-            {/* Panel inferior de Inspección / Acción */}
+
             <div className="inventory-details" style={{ marginTop: '1rem', borderTop: '1px dashed #33ff00', paddingTop: '0.8rem', minHeight: '60px' }}>
               {selectedItemIndex !== null && game.inventory[selectedItemIndex] ? (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -872,7 +840,6 @@ export default function App() {
             <div className="panel-title">STATS</div>
             {/* Usamos whiteSpace: 'pre' y una fuente monoespaciada para garantizar la cuadrícula ASCII */}
             <div className="ascii-stats-container" style={{whiteSpace: 'pre', fontSize: '2rem', color: '#33ff00' }}>
-              {/* Filas de Atributos */}
               {statNames.map((stat) => {
                 const namePadded = stat.padEnd(12, ' ');
                 const valPadded = game.stats[stat].toString().padStart(2, '0');
@@ -908,8 +875,6 @@ export default function App() {
                   </div>
                 );
               })}
-              
-              {/* {`+-----------------------+\n`} */}
             </div>
           </div>
         </section>
@@ -933,17 +898,15 @@ export default function App() {
                         backgroundColor: cell.terrain === 'mountain' ? 'rgba(51, 255, 0, 0.05)' : 'transparent'
                       }}
                     >
-                      {/* Terrain Graphic */}
-                      <span style={{ 
-                        opacity: visual.opacity, 
-                        fontWeight: visual.weight as any, // "as any" evita quejas tontas de TypeScript aquí
-                        fontSize: visual.size,            // <-- Toma el tamaño de tu diccionario
-                        lineHeight: 1                     // <-- Evita que el ícono grande empuje la grilla hacia abajo
+                      <span style={{
+                        opacity: visual.opacity,
+                        fontWeight: visual.weight as any, // union type is too narrow, widen it
+                        fontSize: visual.size,
+                        lineHeight: 1 // keeps big glyphs from pushing the grid row taller
                       }}>
                         {visual.char}
                       </span>
 
-                      {/* Player Overlay */}
                       {isPlayerHere && (
                         <span style={{ 
                           position: 'absolute', 
@@ -960,8 +923,7 @@ export default function App() {
                 }),
               )}
             </div>
-            {/* if debug then show buttons */}
-              {isDebugMode && (
+            {isDebugMode && (
               <div className="map-controls" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <button type="button" onClick={() => movePlayer(0, -1)} style={{ marginBottom: '0.5rem' }}>↑</button>
                 <div>
@@ -970,8 +932,7 @@ export default function App() {
                 </div>
                 <button type="button" onClick={() => movePlayer(0, 1)} style={{ marginTop: '0.5rem' }}>↓</button>
               </div>
-              )
-            }
+            )}
           </div>
 
           <div className="panel npc-panel">
@@ -987,9 +948,6 @@ export default function App() {
               )}
             </div>
 
-            {/* NPC profile + the whole exchange lives here, below its head —
-                never in the narrator log, whether the narrator is describing
-                the NPC or the player is talking to it directly below. */}
             {game.activeNpc && (
               <div className="npc-dialogue-panel">
                 <div className="npc-profile">
@@ -1131,10 +1089,8 @@ function WireframeModel({ src, seed }: { src: string; seed: number }) {
 
       const rawPoints = model.vertices.map((vertex) => project(vertex, time));
 
-      // Auto-fit the mesh to whatever size the NPC panel currently has,
-      // instead of relying on fixed pixel offsets tuned for one canvas size
-      // — those cropped the head whenever the panel was shorter/narrower
-      // than the size they were tuned for.
+      // Auto-fit the mesh to the panel's current size instead of fixed pixel
+      // offsets, which cropped the head on smaller panels.
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       rawPoints.forEach((p) => {
         if (p.x < minX) minX = p.x;

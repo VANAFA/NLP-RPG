@@ -51,21 +51,33 @@ button:hover {
 
 .app-shell {
   position: relative;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   padding: 14px;
-  background: radial-gradient(circle at top, rgba(51, 255, 0, 0.08), transparent 35%), #000;
-  perspective: 1000px; /* Para dar un ligero efecto 3D al contenido */
+  overflow: hidden;
+  background: radial-gradient(circle at top, rgba(51, 255, 0, 0.08), transparent 35%), #050505;
+  border-radius: 80px / 25px; /* curvatura elíptica, simula la carcasa del tubo */
+  text-shadow: 1.5px 0px 1px rgba(255, 0, 0, 0.6), -1.5px 0px 1px rgba(0, 255, 255, 0.6); /* aberración cromática */
+  perspective: 1000px; /* ligero efecto 3D al contenido */
 }
 
 .scanlines {
-  pointer-events: none;
   position: absolute;
-  inset: 0;
-  background: linear-gradient(rgba(255,255,255,0.03) 50%, transparent 50%);
-  background-size: 100% 4px;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 15vh;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0.05) 50%, rgba(255,255,255,0));
+  z-index: 998;
+  opacity: 0.6;
+  animation: roll 8s linear infinite;
   mix-blend-mode: screen;
-  opacity: 0.2;
+  pointer-events: none;
+}
+
+@keyframes roll {
+  0% { transform: translateY(-100vh); }
+  100% { transform: translateY(100vh); }
 }
 
 .top-bar {
@@ -123,8 +135,6 @@ button:hover {
   grid-template-columns: 1.1fr 1fr 0.95fr;
   gap: 12px;
   height: calc(100% - 46px);
-  /* Efecto de ligera inclinación para simular la curvatura del monitor */
-  /* transform: rotateX(2deg) rotateY(-1deg) scale(0.98); */
   transform-style: preserve-3d;
   transition: transform 0.1s;
 }
@@ -405,108 +415,46 @@ button:hover {
   }
 }
 
-/* 1. Contenedor principal: Aberración Cromática en los textos */
-.app-shell {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  background-color: #050505;
-  
-  /* Curvatura elíptica: comprime las esquinas simulando la carcasa del tubo */
-  border-radius: 80px / 25px; 
-  
-  /* El sangrado de texto que ya tenías */
-  text-shadow: 1.5px 0px 1px rgba(255, 0, 0, 0.6), -1.5px 0px 1px rgba(0, 255, 255, 0.6);
-}
-
-/* 2. Capa Frontal: Scanlines finas y máscara RGB */
-/* Scanlines estáticas más gruesas y oscuras */
+/* Scanlines finas y máscara RGB en capa frontal */
 .app-shell::before {
   content: " ";
   display: block;
   position: absolute;
   top: 0; left: 0; bottom: 0; right: 0;
-  background: 
-    /* Cambiamos la opacidad del negro a 0.4 para más contraste */
-    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+  background:
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
     linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-  /* Aumentamos de 4px a 7px de grosor */
   background-size: 100% 6px, 3px 100%;
   z-index: 999;
-  pointer-events: none; 
+  pointer-events: none;
 }
 
-/* Y asegúrate de que tu ::after siga teniendo una sombra interna FUERTE */
 .app-shell::after {
   content: " ";
   display: block;
   position: absolute;
   top: 0; left: 0; bottom: 0; right: 0;
   background: radial-gradient(circle, rgba(0,0,0,0) 70%, rgba(0,0,0,0.4) 100%);
-  
-  /* Esto es lo que le da "volumen" al tubo de cristal */
+
+  /* le da volumen al tubo de cristal */
   box-shadow: inset 0 0 50px rgba(0,0,0,0.8);
-  
-  border-radius: 80px / 25px; /* Debe coincidir con la carcasa */
+
+  border-radius: 80px / 25px; /* debe coincidir con la carcasa */
   z-index: 1000;
   pointer-events: none;
 }
 
-/* El haz de refresco del monitor (Fuerte y visible) */
-.scanlines {
-  position: absolute;
-  top: 0; left: 0;
-  width: 100vw;
-  height: 12vh; /* Un haz un poco más grueso */
-  background: linear-gradient(
-    to bottom,
-    rgba(200, 255, 200, 0),
-    rgba(200, 255, 200, 0.25) 50%, /* Luz cruda y más opaca */
-    rgba(200, 255, 200, 0)
-  );
-  z-index: 9999; /* Asegura que pase por encima de absolutamente todo */
-  animation: roll 6s linear infinite;
-  pointer-events: none;
-}
-
-/* Opcional: Asegúrate de que el body tenga un fondo oscuro por si se ven las esquinas de fuera del tubo */
 body {
-  background-color: #000;
+  background-color: #000; /* por si se asoman las esquinas fuera del tubo */
 }
 
-/* 4. Animación de la barra de refresco gruesa (Tu div actual) */
-@keyframes roll {
-  0% { transform: translateY(-100vh); }
-  100% { transform: translateY(100vh); }
-}
-
-.scanlines {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 15vh;
-  /* Brillo blanco semitransparente */
-  background: linear-gradient(
-    to bottom,
-    rgba(255,255,255,0),
-    rgba(255,255,255,0.05) 50%,
-    rgba(255,255,255,0)
-  );
-  z-index: 998;
-  opacity: 0.6;
-  animation: roll 8s linear infinite;
-  pointer-events: none;
-}
-/* Panel de ajustes de conexión al servidor de Kaggle (URL/API key) */
 .settings-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
   display: grid;
   place-items: center;
-  z-index: 10000; /* por encima de .scanlines (9999) y app-shell::before/::after (999/1000) */
+  z-index: 10000; /* por encima de .scanlines (998) y app-shell::before/::after (999/1000) */
 }
 
 .settings-panel {
