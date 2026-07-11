@@ -1,0 +1,18 @@
+[
+  {"positive": "The knight drew his steel longsword and readied his wooden shield.", "negative": "The knight drew his laser pistol and readied his energy shield."},
+  {"positive": "She lit a torch to see through the dark cave.", "negative": "She switched on her flashlight app to see through the dark cave."},
+  {"positive": "The messenger rode his horse through the night to warn the village.", "negative": "The messenger sped on his motorcycle through the night to warn the village."},
+  {"positive": "He paid the toll with a handful of silver coins.", "negative": "He paid the toll by tapping his credit card on the reader."},
+  {"positive": "The wizard cast a spell to seal the ancient door.", "negative": "The technician entered a passcode to unlock the vault door."},
+  {"positive": "The scout sent word by carrier pigeon to the castle.", "negative": "The scout radioed headquarters from the castle."},
+  {"positive": "They sheltered from the storm inside a crumbling stone tower.", "negative": "They sheltered from the storm inside a crashed spaceship."},
+  {"positive": "The healer brewed a poultice of herbs for the wounded soldier.", "negative": "The medic injected the wounded soldier with a nanobot serum."},
+  {"positive": "The blacksmith hammered a new blade over the forge fire.", "negative": "The engineer welded a new chassis under fluorescent lights."},
+  {"positive": "The bard checked the sundial to see how much daylight remained.", "negative": "The bard checked his digital watch to see how much daylight remained."},
+  {"positive": "Guards patrolled the castle walls carrying spears and torches.", "negative": "Robot sentries patrolled the compound scanning with infrared sensors."},
+  {"positive": "The king read the sealed scroll delivered by his herald.", "negative": "The king read the encrypted email delivered to his tablet."},
+  {"positive": "The archer nocked an arrow and drew back her bow.", "negative": "The soldier loaded a magazine and raised his rifle."},
+  {"positive": "The traveler consulted a hand-drawn map by candlelight.", "negative": "The traveler consulted GPS navigation on his smartphone."},
+  {"positive": "The old sage warned of a curse woven by dark magic.", "negative": "The old scientist warned of a virus spreading through the network."},
+  {"positive": "The caravan crossed the desert on the backs of camels.", "negative": "The convoy crossed the desert in armored all-terrain trucks."}
+]
