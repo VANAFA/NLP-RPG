@@ -1,3 +1,8 @@
 .ts
 backend/.venv/
 backend/__pycache__/
+experiments/.env
+experiments/__pycache__/
+experiments/results/
+experiments/figures/
+experiments/paper/

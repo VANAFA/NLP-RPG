@@ -1,0 +1,142 @@
+{
+  "turns": [
+    "I ask the old caretaker directly: where exactly is the key hidden? I need a precise, specific answer.",
+    "I introduce myself to the blacksmith and ask him directly: 'What is your name?'",
+    "I ask the village elder directly: what exactly must we do to complete our quest?",
+    "I search the abandoned cart on the roadside and describe exactly what I find inside it.",
+    "I examine the dead wolf's collar closely and describe exactly what is engraved or attached to it.",
+    "I ask the healer tending the wounded directly: 'What is your name?'",
+    "I ask the caretaker directly: is there a hidden passage in the chapel, and if so, where does it lead?",
+    "I ask the guard captain directly: what password is needed to enter the inner keep?",
+    "I ask the veteran soldier directly: what weakness does the bandit chief have?",
+    "I ask the village elder directly: what reward has been promised for completing this quest?",
+    "I ask the guard captain directly: 'What is your name, soldier?'",
+    "I ask the caretaker directly: where exactly is the treasure vault located?",
+    "I ask the elder directly: what is the exact name of the cursed forest to the north?",
+    "I ask the priestess directly: what exactly does the ritual require to be completed?",
+    "I ask the scout directly: what is the name of the enemy commander leading the siege?",
+    "I ask the captain directly: what exact signal means retreat?",
+    "I continue down the forest path.",
+    "I make camp for the night.",
+    "I share a meal with my companions.",
+    "I practice sword forms at dawn.",
+    "I listen to the wind for danger.",
+    "I mend a tear in my cloak.",
+    "I study the stars for guidance.",
+    "I sharpen my blade by the fire.",
+    "I recount old tales with a fellow traveler.",
+    "I check the supplies in my pack.",
+    "I scout the ridge ahead.",
+    "I rest beside the quiet stream.",
+    "I tighten the straps on my boots.",
+    "I watch the horizon for signs of pursuit.",
+    "I offer a prayer before continuing on.",
+    "I retrace our steps to check for followers.",
+    "I gather kindling for the evening fire.",
+    "I hum a tune to keep my spirits up.",
+    "I clean my boots of the day's mud.",
+    "I take a moment to sketch the surrounding hills.",
+    "I count our remaining coin by firelight.",
+    "I check the knots on our supply packs.",
+    "I trade watch duty with a companion.",
+    "I follow a deer trail out of curiosity."
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "question": "Where is the key hidden?",
+      "source_turn": 1,
+      "extract_prompt": "According to this text, where exactly is the key hidden? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    },
+    {
+      "id": "q2",
+      "question": "What is the blacksmith's name?",
+      "source_turn": 2,
+      "extract_prompt": "According to this text, what name does the blacksmith give? Answer in one short sentence, or say UNKNOWN if no name is clearly given."
+    },
+    {
+      "id": "q3",
+      "question": "What is the party's current objective?",
+      "source_turn": 3,
+      "extract_prompt": "According to this text, what is the party's current objective or quest? Answer in one short sentence, or say UNKNOWN if it isn't stated."
+    },
+    {
+      "id": "q4",
+      "question": "What item did the player find in the abandoned cart?",
+      "source_turn": 4,
+      "extract_prompt": "According to this text, what item was found in the abandoned cart? Answer in one short sentence, or say UNKNOWN if it isn't stated."
+    },
+    {
+      "id": "q5",
+      "question": "What was notable about the wolf's collar?",
+      "source_turn": 5,
+      "extract_prompt": "According to this text, what was notable about the wolf's collar? Answer in one short sentence, or say UNKNOWN if nothing distinctive is stated."
+    },
+    {
+      "id": "q6",
+      "question": "What is the healer's name?",
+      "source_turn": 6,
+      "extract_prompt": "According to this text, what name does the healer give? Answer in one short sentence, or say UNKNOWN if no name is clearly given."
+    },
+    {
+      "id": "q7",
+      "question": "Where does the hidden passage in the chapel lead?",
+      "source_turn": 7,
+      "extract_prompt": "According to this text, is there a hidden passage in the chapel and where does it lead? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    },
+    {
+      "id": "q8",
+      "question": "What password is needed to enter the inner keep?",
+      "source_turn": 8,
+      "extract_prompt": "According to this text, what password is given for entering the inner keep? Answer in one short sentence, or say UNKNOWN if none is clearly given."
+    },
+    {
+      "id": "q9",
+      "question": "What weakness does the bandit chief have?",
+      "source_turn": 9,
+      "extract_prompt": "According to this text, what weakness does the bandit chief have? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    },
+    {
+      "id": "q10",
+      "question": "What reward has been promised for completing the quest?",
+      "source_turn": 10,
+      "extract_prompt": "According to this text, what reward has been promised? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    },
+    {
+      "id": "q11",
+      "question": "What is the guard captain's name?",
+      "source_turn": 11,
+      "extract_prompt": "According to this text, what name does the guard captain give? Answer in one short sentence, or say UNKNOWN if no name is clearly given."
+    },
+    {
+      "id": "q12",
+      "question": "Where is the treasure vault located?",
+      "source_turn": 12,
+      "extract_prompt": "According to this text, where exactly is the treasure vault located? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    },
+    {
+      "id": "q13",
+      "question": "What is the name of the cursed forest to the north?",
+      "source_turn": 13,
+      "extract_prompt": "According to this text, what name is given for the cursed forest? Answer in one short sentence, or say UNKNOWN if no name is clearly given."
+    },
+    {
+      "id": "q14",
+      "question": "What does the ritual require to be completed?",
+      "source_turn": 14,
+      "extract_prompt": "According to this text, what does the ritual require? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    },
+    {
+      "id": "q15",
+      "question": "What is the name of the enemy commander leading the siege?",
+      "source_turn": 15,
+      "extract_prompt": "According to this text, what name is given for the enemy commander? Answer in one short sentence, or say UNKNOWN if no name is clearly given."
+    },
+    {
+      "id": "q16",
+      "question": "What signal means retreat?",
+      "source_turn": 16,
+      "extract_prompt": "According to this text, what exact signal means retreat? Answer in one short sentence, or say UNKNOWN if it isn't clearly stated."
+    }
+  ]
+}

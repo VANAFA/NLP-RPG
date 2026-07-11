@@ -1,0 +1,8 @@
+# Incremental deps for the experiments/ harness on top of backend/requirements.txt
+# (torch/transformers/peft/accelerate are already in backend/.venv — reuse that
+# venv rather than re-downloading multi-GB CUDA wheels; see README.md).
+anthropic>=0.40.0
+pandas>=2.2.0
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+matplotlib>=3.8.0
