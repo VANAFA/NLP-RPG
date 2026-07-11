@@ -41,16 +41,18 @@ def plot_experiment1():
     x = range(len(labels))
     width = 0.35
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 10))
+    # Single column, stacked vertically (portrait paper layout) rather than
+    # a 2x2 grid — see plot_experiment2 for the same treatment.
+    fig, axes = plt.subplots(4, 1, figsize=(7, 20))
     fig.suptitle("Experiment 1 - Narrative Quality and Thematic Control", fontsize=14, fontweight="bold")
 
-    ax = axes[0, 0]
+    ax = axes[0]
     ax.bar(labels, df["thematic_adherence_rate"], color=COLORS)
     ax.set_title("Thematic adherence rate (higher = better)")
     ax.set_ylim(0, 1)
     ax.tick_params(axis="x", rotation=20)
 
-    ax = axes[0, 1]
+    ax = axes[1]
     rel_width = 0.8 / 3
     ax.bar([i - rel_width for i in x], df["judge_cut_off_rate"], rel_width, label="judge: cut off", color="#c44e52")
     ax.bar(list(x), df["hit_max_tokens_rate"], rel_width, label="hit max_tokens", color="#937860")
@@ -64,7 +66,7 @@ def plot_experiment1():
     # Story quality: one group of bars per dimension (fluency/creativity/
     # coherence/immersion), one color per model — same layout as the
     # difficulty-breakdown figure, so the two are visually consistent.
-    ax = axes[1, 0]
+    ax = axes[2]
     dim_keys = [k for k, _ in QUALITY_DIMENSIONS]
     dim_labels = [label for _, label in QUALITY_DIMENSIONS]
     n_models = len(df.index)
@@ -81,7 +83,7 @@ def plot_experiment1():
     ax.legend(fontsize=8)
     ax.grid(axis="y", alpha=0.3)
 
-    ax = axes[1, 1]
+    ax = axes[3]
     ax.bar([i - width / 2 for i in x], df["avg_latency_ms"], width, label="avg", color="#4c72b0")
     ax.bar([i + width / 2 for i in x], df["p95_latency_ms"], width, label="p95", color="#8172b2")
     ax.set_xticks(list(x))
@@ -89,7 +91,10 @@ def plot_experiment1():
     ax.set_title("Latency, ms (lower = better)")
     ax.legend(fontsize=8)
 
-    fig.tight_layout()
+    # Explicit top margin: with 4 tall stacked panels, tight_layout's
+    # automatic spacing doesn't reliably clear room for suptitle, and it was
+    # overlapping the first panel's own title.
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
     cfg.FIGURES_DIR.mkdir(exist_ok=True)
     out_path = cfg.FIGURES_DIR / "experiment1_metrics.png"
     fig.savefig(out_path, dpi=150)
@@ -142,7 +147,8 @@ def plot_experiment2():
     df = pd.read_csv(cfg.EXPERIMENT2_SUMMARY_CSV_PATH)
     levels = [l for l in LEVEL_ORDER if l in df["level"].unique()]
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
+    # Single column, stacked vertically (portrait paper layout).
+    fig, axes = plt.subplots(3, 1, figsize=(7, 15))
     ax1, ax2, ax3 = axes
     fig.suptitle("Experiment 2 - CAVEMAN Compression & Memory Retention", fontsize=14, fontweight="bold")
 
